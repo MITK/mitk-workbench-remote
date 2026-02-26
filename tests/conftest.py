@@ -24,5 +24,3 @@ Fixtures:
     sample_nrrd_bytes: NRRD file bytes for a simple 3D image.
     sample_multilabel_nrrd_bytes: NRRD file bytes for a MultiLabel segmentation.
 """
-
-import pytest
