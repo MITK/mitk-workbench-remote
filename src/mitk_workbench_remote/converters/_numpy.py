@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2024, German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)
+# SPDX-FileCopyrightText: 2026, German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)
 #
 # SPDX-License-Identifier: Apache-2.0
 #
