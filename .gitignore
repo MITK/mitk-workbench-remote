@@ -8,8 +8,6 @@
 /examples/output/*
 avid.config
 
-########## AVID related
-/Utilities
 
 ########## Documentation / Sphinx related
 /docs/build/*
@@ -24,9 +22,6 @@ avid.config
 *.orig
 
 ########## IDE specific
-
-## Office
-~$*
 
 ## vim
 Session.vim
@@ -55,7 +50,6 @@ tramp
 
 # PyCharm
 .idea*
-/avid/examples/.ipynb_checkpoints*
 
 ########## OS specific
 
