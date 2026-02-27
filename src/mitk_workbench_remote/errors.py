@@ -21,3 +21,57 @@
 All exceptions inherit from MitkError. REST error codes are mapped to
 specific exception types by RestTransport.
 """
+
+
+class MitkError(Exception):
+    """Base class for all mitk-workbench-remote exceptions."""
+
+
+class MitkConnectionError(MitkError):
+    """Raised when the network is unreachable or the connection is refused.
+    """
+
+
+class AuthenticationError(MitkError):
+    """Raised on HTTP 401 or 403 responses."""
+
+
+class NodeNotFoundError(MitkError):
+    """Raised when the server returns NODE_NOT_FOUND (HTTP 404).
+
+    Args:
+        uid: The REST API UID of the node that was not found. May be an empty string
+            at the transport layer when no UID context is available.
+    """
+
+    def __init__(self, uid: str) -> None:
+        self.uid = uid
+        super().__init__(f"Node not found: {uid!r}" if uid else "Node not found")
+
+
+class StaleNodeError(MitkError):
+    """Raised when a DataNode reference is used after the node was deleted."""
+
+
+class DataStorageNotAvailableError(MitkError):
+    """Raised when the server returns DATASTORAGE_NOT_AVAILABLE (HTTP 503)."""
+
+
+class TransferError(MitkError):
+    """Raised on UNSUPPORTED_FORMAT (HTTP 415) or I/O failure during transfer."""
+
+
+class ApiError(MitkError):
+    """Catch-all for 4xx/5xx responses not covered by a more specific type.
+
+    Args:
+        status_code: The HTTP status code.
+        code: The error code string from the RFC 7807 body (e.g. ``"UNKNOWN"``).
+        message: The human-readable error message from the response body.
+    """
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        super().__init__(f"HTTP {status_code} [{code}]: {message}")
