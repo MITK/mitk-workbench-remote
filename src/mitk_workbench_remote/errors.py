@@ -28,8 +28,7 @@ class MitkError(Exception):
 
 
 class MitkConnectionError(MitkError):
-    """Raised when the network is unreachable or the connection is refused.
-    """
+    """Raised when the network is unreachable or the connection is refused."""
 
 
 class AuthenticationError(MitkError):

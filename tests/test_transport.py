@@ -439,9 +439,7 @@ def test_server_info_missing_capabilities_defaults_to_empty_tuple() -> None:
     responses.add(
         responses.GET,
         _api("/"),
-        json={"data": {"name": "MITK",
-                       "api_version": "v1",
-                       "mitk_version": "2024"}},
+        json={"data": {"name": "MITK", "api_version": "v1", "mitk_version": "2024"}},
         status=200,
     )
     t = RestTransport(BASE, transfer_mode=TransferMode.DIRECT)
