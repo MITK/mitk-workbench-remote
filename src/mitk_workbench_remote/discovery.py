@@ -16,18 +16,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workbench discovery and lifecycle — find or launch MITK Workbench instances.
-"""
+"""Workbench discovery and lifecycle; find or launch MITK Workbench instances."""
 
 from __future__ import annotations
 
-import json
+import contextlib
+import io
 import os
 import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -36,8 +38,30 @@ from mitk_workbench_remote import errors
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench
 
-_PREFERENCE_PATCH_FLAG: str = "--patch-preferences"
+_PREFERENCE_PATCH_FLAG: str = "--MITK.preferences-override"
 _EXECUTABLE_ENV_VAR: str = "MITK_WORKBENCH_REMOTE"
+
+
+def _build_prefs_xml(port: int, token: str) -> str:
+    """Build the MITK XML preferences string to enable the REST API."""
+    root = ET.Element("preferences")
+    root.set("name", "")
+    restapi = ET.SubElement(root, "preferences")
+    restapi.set("name", "org.mitk.restapi")
+    for prop_name, prop_value in [
+        ("enabled", "true"),
+        ("autoStart", "true"),
+        ("port", str(port)),
+        ("requireAuth", "true"),
+        ("apiToken", token),
+    ]:
+        elem = ET.SubElement(restapi, "property")
+        elem.set("name", prop_name)
+        elem.set("value", prop_value)
+    ET.indent(root, space="    ")
+    buf = io.BytesIO()
+    ET.ElementTree(root).write(buf, encoding="UTF-8", xml_declaration=True)
+    return buf.getvalue().decode("UTF-8")
 
 
 def discover(
@@ -98,7 +122,7 @@ def _find_free_port(start: int = 8080, end: int = 8100) -> int:
         There is an inherent TOCTOU (time-of-check/time-of-use) race between
         releasing the probe socket and the subprocess binding to the port.
         This is unavoidable with the current architecture: MITK requires the
-        port number up-front in the preference JSON, so the socket cannot be
+        port number up-front in the preference XML, so the socket cannot be
         held open across the process boundary.
     """
     for p in range(start, end):
@@ -136,7 +160,7 @@ def launch(
         timeout: Maximum seconds to wait for the server to become healthy
             before giving up.
         extra_args: Additional command-line arguments appended after the
-            preference patch JSON.
+            preference patch XML file reference.
 
     Returns:
         A :class:`~mitk_workbench_remote.workbench.Workbench` handle backed
@@ -144,7 +168,8 @@ def launch(
 
     Raises:
         MitkError: If ``executable`` is ``None`` and ``MITK_WORKBENCH`` is
-            not set, or if no free port is available.
+            not set, if no free port is available, or if the Workbench process
+            exits immediately with a preference-patch failure.
         FileNotFoundError: If the resolved executable path does not exist.
         MitkConnectionError: If the server does not become healthy within
             ``timeout`` seconds.
@@ -166,50 +191,67 @@ def launch(
             raise FileNotFoundError(f"MITK Workbench executable not found: {resolved_exe}")
         resolved_exe = Path(which_result)
 
-    # 2. Build MITK workbench call
+    # 2. Build MITK workbench call & Execute
     if port is None:
         port = _find_free_port()
 
     if token is None:
         token = secrets.token_hex(16)
 
-    prefs = {
-        "org.mitk.restapi": {
-            "enabled": True,
-            "port": port,
-            "token": token,
-            "log_requests": False,
-        }
-    }
-    cmd: list[str] = [str(resolved_exe), _PREFERENCE_PATCH_FLAG, json.dumps(prefs)]
-    if extra_args:
-        cmd.extend(extra_args)
-
-    # Get MITK subprocess running and connected
-    process: subprocess.Popen[bytes] = subprocess.Popen(cmd)
-
-    transport = RestTransport(f"http://localhost:{port}", token=token)
-
-    # Health poll loop — always attempt at least one probe even for timeout=0.
-    # On any non-connection exception the process is terminated before re-raising.
-    deadline = time.monotonic() + timeout
-    last_exc: Exception | None = None
+    fd, prefs_path = tempfile.mkstemp(suffix=".xml", prefix="mitk_prefs_")
     try:
-        while True:
-            try:
-                transport.get("/health")
-                return Workbench(transport, process=process)
-            except errors.MitkConnectionError as exc:
-                last_exc = exc
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(0.5)
-    except:
+        with os.fdopen(fd, "w", encoding="UTF-8") as f:
+            f.write(_build_prefs_xml(port, token))
+
+        # We use the file option and not the direct xml content passing for security
+        # reasons to avoid that the API key can be querried via the process informations
+        cmd: list[str] = [str(resolved_exe), _PREFERENCE_PATCH_FLAG, f"@{prefs_path}"]
+        if extra_args:
+            cmd.extend(extra_args)
+
+        process: subprocess.Popen[bytes] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+
+        transport = RestTransport(f"http://localhost:{port}", token=token)
+
+        # Health poll loop: always attempt at least one probe even for timeout=0.
+        # On any non-connection exception the process is terminated before re-raising.
+        deadline = time.monotonic() + timeout
+        last_exc: Exception | None = None
+        try:
+            while True:
+                returncode = process.poll()
+                if returncode is not None and returncode != 0:
+                    assert process.stderr is not None  # always piped (stderr=subprocess.PIPE)
+                    stderr_text = process.stderr.read().decode("utf-8", errors="replace")
+                    if "Cannot apply preferences" in stderr_text:
+                        raise errors.MitkError(
+                            f"MITK Workbench exited with code {returncode}: failed to apply "
+                            "preference overrides. If this is a fresh installation, please start "
+                            "the Workbench manually once to initialise its preferences store, "
+                            "then try again."
+                        )
+                    raise errors.MitkError(
+                        f"MITK Workbench process exited unexpectedly with code {returncode}."
+                    )
+                try:
+                    transport.get("/health")
+                    return Workbench(transport, process=process)
+                except errors.MitkConnectionError as exc:
+                    last_exc = exc
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.5)
+        except:
+            process.terminate()
+            transport.close()
+            raise
+
+        # Deadline expired — clean up
         process.terminate()
         transport.close()
-        raise
-
-    # Deadline expired — clean up
-    process.terminate()
-    transport.close()
-    raise errors.MitkConnectionError(f"Workbench did not start within {timeout}s") from last_exc
+        raise errors.MitkConnectionError(
+            f"Workbench did not start within {timeout}s"
+        ) from last_exc
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(prefs_path)

@@ -22,12 +22,44 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 from types import TracebackType
+from urllib.parse import urlparse
 
 from mitk_workbench_remote import errors
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport
+
+
+def _find_listening_pid(port: int) -> int | None:
+    """Return the PID of the process listening on *port* (Windows only).
+
+    Parses ``netstat -ano -p TCP`` output.  Returns ``None`` when no
+    matching listener is found or if the command fails.
+    """
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    for line in result.stdout.splitlines():
+        if "LISTENING" not in line:
+            continue
+        parts = line.strip().split()
+        # Format: Proto  LocalAddr  ForeignAddr  State  PID
+        if len(parts) < 5:
+            continue
+        local_addr = parts[1]
+        if local_addr.endswith(f":{port}"):
+            try:
+                return int(parts[-1])
+            except (ValueError, IndexError):
+                continue
+    return None
 
 
 @dataclass(frozen=True)
@@ -138,22 +170,57 @@ class Workbench:
     def shutdown(self) -> None:
         """Terminate the subprocess started by :func:`~mitk_workbench_remote.discovery.launch`.
 
-        Sends ``SIGTERM`` (or ``TerminateProcess`` on Windows) and waits up to
-        10 seconds; falls back to forceful termination (``SIGKILL`` on Unix,
-        ``TerminateProcess`` on Windows) on timeout. Also closes the underlying
-        transport session.
+        On Windows the MITK executable is often a batch-script wrapper, so
+        the :class:`~subprocess.Popen` handle points to ``cmd.exe`` — not the
+        real ``MitkWorkbench.exe``.  Killing the wrapper (or its tree) may
+        leave the actual Workbench running.  We therefore look up the process
+        that owns the REST port via ``netstat`` and kill *that*.
+
+        On Unix, sends ``SIGTERM`` to the subprocess and falls back to
+        ``SIGKILL`` after 10 seconds.
+
+        Also closes the underlying transport session.
 
         Raises:
-            MitkError: If this instance was not created by ``launch()``. Use property is_launched_remotely to check
-            this.
+            MitkError: If this instance was not created by ``launch()``.
         """
         if self._process is None:
-            raise errors.MitkError("shutdown() is only valid for instances started with launch()")
-        self._process.terminate()
+            raise errors.MitkError(
+                "shutdown() is only valid for instances started with launch()"
+            )
+
+        if sys.platform == "win32":
+            # Find the process actually listening on the REST port — this may
+            # differ from self._process.pid when MITK is launched via a
+            # batch-script wrapper (cmd.exe → MitkWorkbench.exe).
+            port = urlparse(self.url).port
+            listener_pid: int | None = None
+            if port is not None:
+                listener_pid = _find_listening_pid(port)
+                if listener_pid is not None:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(listener_pid)],
+                        capture_output=True,
+                    )
+            # Also kill the wrapper process tree, unless it IS the listener
+            # (no wrapper — MITK was started directly).
+            if listener_pid != self._process.pid:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(self._process.pid)],
+                    capture_output=True,
+                )
+        else:
+            self._process.terminate()
+
+        # Use communicate() rather than wait() to drain the stderr pipe that
+        # launch() opens (stderr=PIPE).  wait() with an unread PIPE can
+        # deadlock when the subprocess fills the pipe buffer during shutdown.
         try:
-            self._process.wait(timeout=10)
+            self._process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             self._process.kill()
+            self._process.communicate()
+
         self._transport.close()
 
     def close(self) -> None:

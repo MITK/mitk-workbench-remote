@@ -280,22 +280,27 @@ def test_shutdown_raises_for_connected_instance() -> None:
 
 def test_shutdown_terminates_process() -> None:
     mock_process: MagicMock = MagicMock(spec=subprocess.Popen)
-    mock_process.wait.return_value = 0
+    mock_process.pid = 12345
+    mock_process.communicate.return_value = (b"", b"")
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    wb.shutdown()
-    mock_process.terminate.assert_called_once()
-    mock_process.wait.assert_called_once_with(timeout=10)
+    with patch("subprocess.run"):
+        wb.shutdown()
+    mock_process.communicate.assert_called()
     wb.close()
 
 
-def test_shutdown_kills_if_terminate_times_out() -> None:
+def test_shutdown_kills_if_communicate_times_out() -> None:
     mock_process: MagicMock = MagicMock(spec=subprocess.Popen)
-    mock_process.wait.side_effect = subprocess.TimeoutExpired(cmd="mitk", timeout=10)
+    mock_process.pid = 12345
+    mock_process.communicate.side_effect = [
+        subprocess.TimeoutExpired(cmd="mitk", timeout=10),
+        (b"", b""),  # after kill()
+    ]
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    wb.shutdown()
-    mock_process.terminate.assert_called_once()
+    with patch("subprocess.run"):
+        wb.shutdown()
     mock_process.kill.assert_called_once()
     wb.close()
 
