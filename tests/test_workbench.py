@@ -18,6 +18,7 @@
 
 """Tests for workbench.py."""
 
+import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +27,7 @@ import requests
 import responses
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
@@ -337,4 +339,137 @@ def test_repr_includes_url() -> None:
     wb = Workbench(t)
     assert BASE in repr(wb)
     assert "Workbench" in repr(wb)
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# update()
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_update_posts_to_rendering_update_endpoint() -> None:
+    responses.add(responses.POST, _api("/rendering/update"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.update()
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url == _api("/rendering/update")
+    wb.close()
+
+
+@responses.activate
+def test_update_sends_type_all_by_default() -> None:
+    responses.add(responses.POST, _api("/rendering/update"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.update()
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"type": "all"}
+    wb.close()
+
+
+@responses.activate
+def test_update_sends_custom_windows_type() -> None:
+    responses.add(responses.POST, _api("/rendering/update"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.update(windows="2d")
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"type": "2d"}
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# reinit()
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_reinit_global_posts_empty_body() -> None:
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.reinit()
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {}
+    wb.close()
+
+
+@responses.activate
+def test_reinit_with_uid_strings_sends_uids() -> None:
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.reinit(["node_1", "node_2"])
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"uids": ["node_1", "node_2"]}
+    wb.close()
+
+
+@responses.activate
+def test_reinit_with_data_nodes_extracts_uids() -> None:
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    node = DataNode._from_node_dict(
+        {"uid": "node_1", "name": "CT", "path": "/CT", "parent_uid": None, "data_type": "Image"},
+        t,
+    )
+    wb.reinit([node])
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"uids": ["node_1"]}
+    wb.close()
+
+
+@responses.activate
+def test_reinit_with_mixed_list() -> None:
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    node = DataNode._from_node_dict(
+        {"uid": "node_1", "name": "CT", "path": "/CT", "parent_uid": None, "data_type": "Image"},
+        t,
+    )
+    wb.reinit([node, "node_2"])
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"uids": ["node_1", "node_2"]}
+    wb.close()
+
+
+def test_reinit_raises_value_error_for_empty_list() -> None:
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(ValueError):
+        wb.reinit([])
+    wb.close()
+
+
+@responses.activate
+def test_reinit_raises_node_not_found() -> None:
+    responses.add(
+        responses.POST,
+        _api("/rendering/reinit"),
+        json={"error": {"code": "NODE_NOT_FOUND", "message": "not found"}},
+        status=404,
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(errors.NodeNotFoundError):
+        wb.reinit(["ghost_node"])
+    wb.close()
+
+
+@responses.activate
+def test_reinit_raises_rendering_error() -> None:
+    responses.add(
+        responses.POST,
+        _api("/rendering/reinit"),
+        json={"error": {"code": "RENDERING_ERROR", "message": "render pipeline failure"}},
+        status=422,
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(errors.RenderingError):
+        wb.reinit()
     wb.close()

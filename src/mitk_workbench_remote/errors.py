@@ -72,6 +72,10 @@ class TransferError(MitkError):
     """Raised on UNSUPPORTED_FORMAT (HTTP 415) or I/O failure during transfer."""
 
 
+class RenderingError(MitkError):
+    """Raised when the server returns RENDERING_ERROR (HTTP 422)."""
+
+
 class ApiError(MitkError):
     """Catch-all for 4xx/5xx responses not covered by a more specific type.
 

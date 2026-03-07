@@ -28,6 +28,7 @@ from types import TracebackType
 from urllib.parse import urlparse
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport
 
@@ -114,7 +115,7 @@ class Workbench:
     @property
     def is_launched_remotely(self) -> bool:
         """Returns if the workbench was launched remotely (true) or was just connected to but is
-        independent (false)."""
+         independent (false)."""
         return self._process is not None
 
     @property
@@ -165,6 +166,55 @@ class Workbench:
         return self.ping()
 
     # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+
+    def update(self, *, windows: str = "all") -> None:
+        """Request all render windows to redraw.
+
+        Use after batching data or property changes to make them visible
+        without per-change flicker.
+
+        Args:
+            windows: Which render windows to update: ``"all"`` (default),
+                ``"2d"``, or ``"3d"``.
+
+        Raises:
+            RenderingError: If the rendering framework reports a failure.
+        """
+        self._transport.post("/rendering/update", json={"type": windows})
+
+    def reinit(self, nodes: list[DataNode | str] | None = None) -> None:
+        """Fit render window cameras to the bounding geometry of nodes.
+
+        Three modes:
+
+        - ``nodes=None`` — global reinit: fits all views to all visible data
+          (equivalent to clicking the global reinit button in the Workbench).
+        - single element list — fits views to that node's geometry.
+        - multi-element list — fits views to the combined bounding geometry.
+
+        Args:
+            nodes: Nodes to reinit to. Accepts :class:`DataNode` instances or
+                UID strings. ``None`` performs a global reinit.
+
+        Raises:
+            ValueError: If ``nodes`` is an empty list (use ``None`` for global reinit).
+            NodeNotFoundError: If any listed node does not exist.
+            ApiError: If a node has no data (code ``NO_DATA``) or no usable
+                geometry (code ``NO_GEOMETRY``).
+            RenderingError: If the rendering framework reports a failure.
+        """
+        if nodes is not None and len(nodes) == 0:
+            raise ValueError("nodes must be None (global reinit) or a non-empty list")
+        if nodes is None:
+            body: dict[str, object] = {}
+        else:
+            uids = [n.uid if isinstance(n, DataNode) else str(n) for n in nodes]
+            body = {"uids": uids}
+        self._transport.post("/rendering/reinit", json=body)
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
@@ -183,7 +233,8 @@ class Workbench:
         Also closes the underlying transport session.
 
         Raises:
-            MitkError: If this instance was not created by ``launch()``.
+            MitkError: If this instance was not created by ``launch()``. Use property
+            is_launched_remotely to check this.
         """
         if self._process is None:
             raise errors.MitkError("shutdown() is only valid for instances started with launch()")
