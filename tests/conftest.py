@@ -24,3 +24,18 @@ Fixtures:
     sample_nrrd_bytes: NRRD file bytes for a simple 3D image.
     sample_multilabel_nrrd_bytes: NRRD file bytes for a MultiLabel segmentation.
 """
+
+from collections.abc import Generator
+
+import pytest
+import responses as responses_lib
+
+from mitk_workbench_remote.transport import RestTransport
+
+
+@pytest.fixture
+def mock_transport() -> Generator[tuple[RestTransport, responses_lib.RequestsMock], None, None]:
+    """RestTransport pointed at a fake localhost, with responses mocking active."""
+    with responses_lib.RequestsMock() as rsps:
+        transport = RestTransport("http://127.0.0.1:8080", token="test-token")
+        yield transport, rsps
