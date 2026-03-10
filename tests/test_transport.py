@@ -330,8 +330,10 @@ def test_406_transfer_mode_not_available_raises_TransferError() -> None:
         },
         status=406,
     )
-    with RestTransport(BASE, transfer_mode=TransferMode.DIRECT) as t,\
-         pytest.raises(errors.TransferError):
+    with (
+        RestTransport(BASE, transfer_mode=TransferMode.DIRECT) as t,
+        pytest.raises(errors.TransferError),
+    ):
         t.get_binary("/nodes/abc/data")
 
 
