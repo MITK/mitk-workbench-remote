@@ -32,7 +32,19 @@ class MitkConnectionError(MitkError):
 
 
 class AuthenticationError(MitkError):
-    """Raised on HTTP 401 or 403 responses."""
+    """Raised on HTTP 401 (unauthenticated) or 403 (unauthorized) responses.
+
+    Callers can inspect ``status_code`` to distinguish between a missing or
+    invalid token (401) and a valid token with insufficient permissions (403).
+
+    Args:
+        status_code: The HTTP status code (401 or 403).
+        message: The human-readable error message from the response body.
+    """
+
+    def __init__(self, status_code: int, message: str) -> None:
+        self.status_code = status_code
+        super().__init__(message)
 
 
 class NodeNotFoundError(MitkError):
@@ -67,6 +79,8 @@ class ApiError(MitkError):
         status_code: The HTTP status code.
         code: The error code string from the RFC 7807 body (e.g. ``"UNKNOWN"``).
         message: The human-readable error message from the response body.
+            Stored on ``.message`` for structured access; ``str(err)`` returns
+            the full ``"HTTP <status> [<code>]: <message>"`` form.
     """
 
     def __init__(self, status_code: int, code: str, message: str) -> None:

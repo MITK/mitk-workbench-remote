@@ -26,7 +26,6 @@ Fixtures:
 """
 
 from collections.abc import Generator
-from typing import Any
 
 import pytest
 import responses as responses_lib
@@ -35,7 +34,7 @@ from mitk_workbench_remote.transport import RestTransport
 
 
 @pytest.fixture
-def mock_transport() -> Generator[tuple[RestTransport, Any], None, None]:
+def mock_transport() -> Generator[tuple[RestTransport, responses_lib.RequestsMock], None, None]:
     """RestTransport pointed at a fake localhost, with responses mocking active."""
     with responses_lib.RequestsMock() as rsps:
         transport = RestTransport("http://127.0.0.1:8080", token="test-token")

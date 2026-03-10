@@ -128,7 +128,12 @@ class RestResponse:
 
     @property
     def text(self) -> str:
-        """Raw response body as text."""
+        """Raw response body as text.
+
+        Encoding is determined by ``requests`` from the Content-Type header or
+        charset auto-detection.  Use ``.content`` for endpoints that return
+        binary data.
+        """
         return self._response.text
 
     def json(self) -> Any:
@@ -257,7 +262,8 @@ class RestTransport:
 
     def get_binary(self, path: str, **kwargs: Any) -> RestResponse:
         """Send a GET request for binary data, advertising the preferred transfer mode."""
-        headers = kwargs.pop("headers", {})
+        # Copy the caller's dict so setdefault does not mutate it as a side effect.
+        headers = {**kwargs.pop("headers", {})}
         headers.setdefault("X-MITK-Transfer-Mode", self.transfer_mode)
         return self._request("GET", path, headers=headers, **kwargs)
 
@@ -322,9 +328,9 @@ class RestTransport:
         if code == "DATASTORAGE_NOT_AVAILABLE":
             raise errors.DataStorageNotAvailableError(message)
         if status == 401 or code == "UNAUTHORIZED":
-            raise errors.AuthenticationError(message)
+            raise errors.AuthenticationError(status, message)
         if status == 403 or code == "ACCESS_DENIED":
-            raise errors.AuthenticationError(message)
+            raise errors.AuthenticationError(status, message)
         if code == "TRANSFER_MODE_NOT_AVAILABLE":
             raise errors.TransferError(message)
         if code == "UNSUPPORTED_FORMAT":
@@ -333,9 +339,15 @@ class RestTransport:
 
     def _is_localhost(self) -> bool:
         parsed = urllib.parse.urlparse(self._base_url)
-        return parsed.hostname in {"localhost", "127.0.0.1", "::1", "[::1]"}
+        # urlparse strips brackets from IPv6 literals, so "::1" matches http://[::1]:8080
+        return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
 
     def _detect_transfer_mode(self) -> TransferMode:
+        # file-reference requires direct filesystem access, so it is only viable
+        # when the server is on localhost.  For remote hosts we short-circuit here
+        # and return DIRECT without querying the server at all — the server query
+        # would only be needed to learn supported modes, which is irrelevant when
+        # the only viable mode is DIRECT regardless.
         if self._is_localhost() and TransferMode.FILE_REFERENCE in self.server_info.transfer_modes:
             return TransferMode.FILE_REFERENCE
         return TransferMode.DIRECT
