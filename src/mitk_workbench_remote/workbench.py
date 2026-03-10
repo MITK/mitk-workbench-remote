@@ -113,7 +113,7 @@ class Workbench:
     @property
     def is_launched_remotely(self) -> bool:
         """Returns if the workbench was launched remotely (true) or was just connected to but is
-         independent (false)."""
+        independent (false)."""
         return self._process is not None
 
     @property
