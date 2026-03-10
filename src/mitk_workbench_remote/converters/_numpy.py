@@ -16,8 +16,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""numpy ↔ NRRD converter — always available.
+"""numpy converter -- always available."""
 
-Converts numpy arrays to NRRD bytes for upload (no spatial metadata assumed)
-and NRRD bytes to Image objects for download (spatial metadata from header).
-"""
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+
+class NumpyConverter:
+    """Converter for numpy ndarrays."""
+
+    @property
+    def target_type(self) -> type:
+        return np.ndarray
+
+    def can_handle(self, obj: Any) -> bool:
+        return isinstance(obj, np.ndarray)
+
+    def extract_geometry(self, obj: Any) -> dict[str, Any]:
+        return {}
+
+    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+        return {}
+
+    def to_ndarray(self, obj: Any) -> np.ndarray:
+        return obj  # type: ignore[no-any-return]
+
+    def to_nrrd_bytes(self, obj: Any) -> bytes:
+        from mitk_workbench_remote._io.nrrd import write_nrrd
+        from mitk_workbench_remote.image import Image
+
+        image = Image(obj)
+        return write_nrrd(image)
+
+    def from_image(self, image: Any) -> np.ndarray:
+        return image.array  # type: ignore[no-any-return]

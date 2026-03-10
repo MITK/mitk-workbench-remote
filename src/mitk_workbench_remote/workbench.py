@@ -242,7 +242,7 @@ class Workbench:
         if sys.platform == "win32":
             # Find the process actually listening on the REST port — this may
             # differ from self._process.pid when MITK is launched via a
-            # batch-script wrapper (cmd.exe → MitkWorkbench.exe).
+            # batch-script wrapper (cmd.exe -> MitkWorkbench.exe).
             port = urlparse(self.url).port
             listener_pid: int | None = None
             if port is not None:

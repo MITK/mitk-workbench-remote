@@ -19,13 +19,28 @@
 """Tests for node.py."""
 
 import json
+from pathlib import Path
+from unittest.mock import PropertyMock, patch
 
+import numpy as np
 import pytest
 import responses
 
 from mitk_workbench_remote import errors
-from mitk_workbench_remote.node import DataNode, _deserialize_property, _serialize_property
-from mitk_workbench_remote.transport import RestTransport
+from mitk_workbench_remote.errors import UnsupportedDataTypeError
+from mitk_workbench_remote.image import Image
+from mitk_workbench_remote.node import (
+    DataNode,
+    PropertyScope,
+    _deserialize_property,
+    _serialize_property,
+)
+from mitk_workbench_remote.transport import (
+    FileAccessConfig,
+    FileAccessMode,
+    RestTransport,
+    TransferMode,
+)
 
 BASE = "http://127.0.0.1:8080"
 
@@ -338,9 +353,35 @@ def test_update_properties_passes_scope_param() -> None:
         json={},
         status=200,
     )
-    node.update_properties(scope="data", visible=True)
+    node.update_properties(PropertyScope.DATA, visible=True)
     url = responses.calls[0].request.url
     assert "property_scope=data" in url
+
+
+@responses.activate
+def test_update_properties_passes_context_param() -> None:
+    node = _make_node()
+    responses.add(
+        responses.PATCH,
+        _api("/datastorage/nodes/node_1/properties"),
+        json={},
+        status=200,
+    )
+    node.update_properties(context="renderer1", visible=True)
+    assert "context=renderer1" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_update_properties_omits_context_when_none() -> None:
+    node = _make_node()
+    responses.add(
+        responses.PATCH,
+        _api("/datastorage/nodes/node_1/properties"),
+        json={},
+        status=200,
+    )
+    node.update_properties(visible=True)
+    assert "context=" not in responses.calls[0].request.url
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +412,7 @@ def test_get_properties_passes_scope_param() -> None:
         json=_props_response({}),
         status=200,
     )
-    node.get_properties(scope="node")
+    node.get_properties(scope=PropertyScope.NODE)
     assert "property_scope=node" in responses.calls[0].request.url
 
 
@@ -472,8 +513,34 @@ def test_set_property_passes_scope_param() -> None:
         json={},
         status=200,
     )
-    node.set_property("visible", True, scope="data")
+    node.set_property("visible", True, scope=PropertyScope.DATA)
     assert "property_scope=data" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_set_property_passes_context_param() -> None:
+    node = _make_node()
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/properties/opacity"),
+        json={},
+        status=200,
+    )
+    node.set_property("opacity", 0.5, context="renderer2")
+    assert "context=renderer2" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_set_property_omits_context_when_none() -> None:
+    node = _make_node()
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/properties/opacity"),
+        json={},
+        status=200,
+    )
+    node.set_property("opacity", 0.5)
+    assert "context=" not in responses.calls[0].request.url
 
 
 @responses.activate
@@ -518,7 +585,7 @@ def test_delete_property_passes_scope_param() -> None:
         body=b"",
         status=204,
     )
-    node.delete_property("myProp", scope="data")
+    node.delete_property("myProp", scope=PropertyScope.DATA)
     assert "property_scope=data" in responses.calls[0].request.url
 
 
@@ -706,3 +773,321 @@ def test_reinit_sends_own_uid_in_body() -> None:
     node.reinit()
     body = json.loads(responses.calls[0].request.body)
     assert body == {"uids": ["node_1"]}
+
+
+# ---------------------------------------------------------------------------
+# Helpers for data transfer tests
+# ---------------------------------------------------------------------------
+
+
+def _make_nrrd_bytes() -> bytes:
+    """Create minimal NRRD bytes from a small array."""
+    from mitk_workbench_remote._io import write_nrrd
+
+    arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    img = Image(arr, spacing=(0.5, 1.0, 2.0), origin=(1.0, 2.0, 3.0))
+    return write_nrrd(img)
+
+
+def _make_direct_node(data_type: str = "Image") -> DataNode:
+    """Create a DataNode with transfer_mode=DIRECT."""
+    transport = RestTransport(BASE, transfer_mode=TransferMode.DIRECT)
+    return DataNode._from_node_dict({**_node(), "data_type": data_type}, transport)
+
+
+def _make_file_reference_node(data_type: str = "Image") -> DataNode:
+    """Create a DataNode with transfer_mode=FILE_REFERENCE."""
+    transport = RestTransport(BASE, transfer_mode=TransferMode.FILE_REFERENCE)
+    return DataNode._from_node_dict({**_node(), "data_type": data_type}, transport)
+
+
+# ---------------------------------------------------------------------------
+# get_data
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_get_data_direct_mode() -> None:
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    image = node.get_data()
+    assert isinstance(image, Image)
+    assert image.shape == (2, 3, 4)
+    assert np.allclose(image.spacing, (0.5, 1.0, 2.0))
+
+
+@responses.activate
+def test_get_data_file_reference_mode(tmp_path: Path) -> None:
+    node = _make_file_reference_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    nrrd_file = tmp_path / "data.nrrd"
+    nrrd_file.write_bytes(nrrd_bytes)
+
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        json={"transfer": {"file_path": str(nrrd_file)}},
+        status=200,
+        content_type="application/json",
+    )
+    image = node.get_data()
+    assert isinstance(image, Image)
+    assert image.shape == (2, 3, 4)
+
+
+@responses.activate
+def test_get_data_include_properties_false() -> None:
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    image = node.get_data(include_properties=False)
+    # properties should not contain server-fetched properties
+    # (may contain NRRD custom fields, but not node properties)
+    assert "name" not in image.metadata
+
+
+@responses.activate
+def test_get_data_include_properties_true() -> None:
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/properties"),
+        json=_props_response({"imagescalar.min": 0.0, "imagescalar.max": 255.0}),
+        status=200,
+    )
+    image = node.get_data(include_properties=True)
+    assert image.metadata.get("imagescalar.min") == 0.0
+    assert image.metadata.get("imagescalar.max") == 255.0
+
+
+@responses.activate
+def test_get_data_no_data_raises() -> None:
+    node = _make_direct_node()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        json={"error": {"code": "NODE_NOT_FOUND", "message": "no data"}},
+        status=404,
+    )
+    with pytest.raises(errors.NodeNotFoundError):
+        node.get_data()
+
+
+def test_get_data_unsupported_data_type_raises() -> None:
+    node = _make_direct_node(data_type="Surface")
+    with pytest.raises(UnsupportedDataTypeError, match="Surface"):
+        node.get_data()
+
+
+def test_get_data_none_data_type_raises() -> None:
+    transport = RestTransport(BASE, transfer_mode=TransferMode.DIRECT)
+    node = DataNode._from_node_dict({**_node(), "data_type": None}, transport)
+    with pytest.raises(UnsupportedDataTypeError, match="None"):
+        node.get_data()
+
+
+def test_get_data_unsupported_type_does_not_make_http_call() -> None:
+    """Early validation must reject before any HTTP request."""
+    node = _make_direct_node(data_type="PointSet")
+    # No responses registered -- if HTTP were attempted, responses library
+    # would raise ConnectionError.
+    with pytest.raises(UnsupportedDataTypeError):
+        node.get_data()
+
+
+def test_get_data_multilabel_segmentation_not_implemented() -> None:
+    node = _make_direct_node(data_type="MultiLabelSegmentation")
+    with pytest.raises(NotImplementedError, match="MultiLabelSegmentation"):
+        node.get_data()
+
+
+# ---------------------------------------------------------------------------
+# save_data
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_save_data_direct_mode(tmp_path: Path) -> None:
+    node = _make_direct_node(data_type="Surface")
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    dest = tmp_path / "output.nrrd"
+    result = node.save_data(dest)
+    assert result == dest
+    assert dest.read_bytes() == nrrd_bytes
+
+
+@responses.activate
+def test_save_data_file_reference_mode(tmp_path: Path) -> None:
+    node = _make_file_reference_node(data_type="Surface")
+    nrrd_bytes = _make_nrrd_bytes()
+    source_file = tmp_path / "server_data.nrrd"
+    source_file.write_bytes(nrrd_bytes)
+
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        json={"transfer": {"file_path": str(source_file)}},
+        status=200,
+        content_type="application/json",
+    )
+    dest = tmp_path / "output.nrrd"
+    result = node.save_data(dest)
+    assert result == dest
+    assert dest.read_bytes() == nrrd_bytes
+
+
+@responses.activate
+def test_save_data_works_for_unsupported_data_type(tmp_path: Path) -> None:
+    """save_data must work even for data types that get_data cannot handle."""
+    node = _make_direct_node(data_type="PointSet")
+    fake_bytes = b"NRRD0004\nfake pointset data"
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=fake_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    dest = tmp_path / "pointset.nrrd"
+    node.save_data(dest)
+    assert dest.read_bytes() == fake_bytes
+
+
+# ---------------------------------------------------------------------------
+# set_data
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_set_data_direct_mode_image() -> None:
+    node = _make_direct_node()
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    arr = np.zeros((3, 4, 5), dtype=np.float32)
+    img = Image(arr)
+    node.set_data(img)
+    assert len(responses.calls) == 1
+    req = responses.calls[0].request
+    assert req.headers.get("Content-Type") == "application/octet-stream"
+    assert 'filename="data.nrrd"' in req.headers.get("Content-Disposition", "")
+
+
+@responses.activate
+def test_set_data_direct_mode_ndarray() -> None:
+    node = _make_direct_node()
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    arr = np.zeros((3, 4, 5), dtype=np.float32)
+    node.set_data(arr)
+    assert len(responses.calls) == 1
+    # Body should be NRRD bytes (starts with NRRD magic)
+    assert responses.calls[0].request.body[:4] == b"NRRD"
+
+
+def _patch_file_access(node: DataNode, config: FileAccessConfig):  # type: ignore[type-arg]
+    """Context manager to mock file_access_config on a node's transport."""
+    return patch.object(
+        type(node._transport),
+        "file_access_config",
+        new_callable=PropertyMock,
+        return_value=config,
+    )
+
+
+_UNRESTRICTED = FileAccessConfig(
+    mode=FileAccessMode.UNRESTRICTED,
+    restrictions_active=False,
+    max_active_temp_dirs_per_ip=5,
+)
+
+
+@responses.activate
+def test_set_data_file_reference_mode_image(tmp_path: Path) -> None:
+    node = _make_file_reference_node()
+    with _patch_file_access(node, _UNRESTRICTED):
+        responses.add(
+            responses.PUT,
+            _api("/datastorage/nodes/node_1/data"),
+            json={},
+            status=200,
+        )
+        arr = np.zeros((3, 4, 5), dtype=np.float32)
+        img = Image(arr)
+        node.set_data(img)
+        body = json.loads(responses.calls[0].request.body)
+        assert body["transfer"]["mode"] == "file-reference"
+        # Temp file should have been cleaned up
+        file_path = body["transfer"]["file_path"]
+        assert not Path(file_path).exists()
+
+
+def test_set_data_unsupported_type() -> None:
+    node = _make_direct_node()
+    with pytest.raises(TypeError, match="No converter found"):
+        node.set_data(42)
+
+
+def test_set_data_rejects_file_path() -> None:
+    node = _make_direct_node()
+    with pytest.raises(TypeError, match="No converter found"):
+        node.set_data("/some/path/data.nrrd")
+
+
+@responses.activate
+def test_set_data_include_properties() -> None:
+    node = _make_direct_node()
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    responses.add(
+        responses.PATCH,
+        _api("/datastorage/nodes/node_1/properties"),
+        json={},
+        status=200,
+    )
+    arr = np.zeros((3, 4, 5), dtype=np.float32)
+    img = Image(arr, properties={"my_prop": "my_value"})
+    node.set_data(img, include_properties=True)
+    # Should have made 2 calls: PUT data + PATCH properties
+    assert len(responses.calls) == 2
+    patch_body = json.loads(responses.calls[1].request.body)
+    assert patch_body.get("my_prop") == "my_value"

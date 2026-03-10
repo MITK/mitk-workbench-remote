@@ -16,12 +16,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""NRRD I/O and MultiLabel parsing — internal sub-package.
+"""NRRD I/O and MultiLabel parsing -- internal sub-package."""
 
-Public interface:
-    read_nrrd(data: bytes) -> Image
-    write_nrrd(image: Image) -> bytes
-    read_multilabel_nrrd(data: bytes) -> MultiLabelSegmentation
-    write_multilabel_nrrd(seg: MultiLabelSegmentation) -> bytes
-    is_multilabel_nrrd(header: dict) -> bool
-"""
+from mitk_workbench_remote._io.multilabel_nrrd import (
+    is_multilabel_nrrd,
+    parse_labelgroups_json,
+    read_multilabel_nrrd_raw,
+    serialize_labelgroups_json,
+    write_multilabel_nrrd_raw,
+)
+from mitk_workbench_remote._io.nrrd import read_nrrd, write_nrrd
+
+__all__ = [
+    "is_multilabel_nrrd",
+    "parse_labelgroups_json",
+    "read_multilabel_nrrd_raw",
+    "read_nrrd",
+    "serialize_labelgroups_json",
+    "write_multilabel_nrrd_raw",
+    "write_nrrd",
+]

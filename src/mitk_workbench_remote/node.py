@@ -16,19 +16,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DataNode wrapper — a single node in the MITK DataStorage.
-
-Classes:
-    DataNode: Represents one node with property shortcuts (name, visible, opacity, color),
-        data access (get_data, set_data), child management, and batch property updates.
-"""
 from __future__ import annotations
 
 import html as _html
+import tempfile
 from enum import Enum
+from pathlib import Path
 from typing import Any, cast
 
+from mitk_workbench_remote import _io
 from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
+from mitk_workbench_remote.errors import UnsupportedDataTypeError
 from mitk_workbench_remote.transport import RestTransport, TransferMode
 
 
@@ -53,6 +51,10 @@ class PropertyScope(str, Enum):
 
 class DataNode:
     """A single node in the MITK DataStorage.
+
+    Wrapper that rpresents one node with property shortcuts (name, visible,
+    opacity, color), data access (get_data, set_data), child management,
+    and batch property updates.
 
     Do not construct directly — obtain instances from
     :class:`~mitk_workbench_remote.storage.DataStorage`.
@@ -363,7 +365,7 @@ class DataNode:
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Refresh cached metadata from the server.
+        """Refresh cached properties from the server.
 
         Updates ``data_type``, ``path``, and the display caches for
         ``_name`` and ``_parent_uid``.
@@ -377,6 +379,219 @@ class DataNode:
         self._name = data["name"]
         self._path = data.get("path", "")
         self._parent_uid = data.get("parent_uid")
+
+    # ------------------------------------------------------------------
+    # Data transfer
+    # ------------------------------------------------------------------
+
+    # Data types that can be reconstructed as in-memory Python objects.
+    _SUPPORTED_DATA_TYPES: frozenset[str] = frozenset({
+        "Image",
+        "MultiLabelSegmentation",
+    })
+
+    def _check_data_type_supported(self) -> str:
+        """Validate that the node's data type can be represented in Python.
+
+        Returns:
+            The validated data type string.
+
+        Raises:
+            UnsupportedDataTypeError: If the data type is not in
+                :attr:`_SUPPORTED_DATA_TYPES`.
+            UnsupportedDataTypeError: If the data type is ``None``
+                (node has no data assigned).
+        """
+        dt = self._data_type
+        if dt is None:
+            raise UnsupportedDataTypeError("None (no data)")
+        if dt not in self._SUPPORTED_DATA_TYPES:
+            raise UnsupportedDataTypeError(dt)
+        return dt
+
+    def get_data(self, *, include_properties: bool = False) -> Any:
+        """Download this node's data and return a typed Python object.
+
+        The returned type depends on the node's
+        :attr:`data_type`:
+
+        * ``"Image"`` -- returns an :class:`~mitk_workbench_remote.image.Image`
+        * ``"MultiLabelSegmentation"`` -- not yet implemented
+
+        The transfer mode (direct or file-reference) is negotiated automatically
+        based on the transport's :attr:`~RestTransport.transfer_mode`.
+
+        Args:
+            include_properties: If ``True``, also fetch data-scope properties
+                and store them in the returned object's properties.
+
+        Returns:
+            A typed Python object matching the node's data type.
+
+        Raises:
+            UnsupportedDataTypeError: If the data type cannot be represented
+                in Python. Use :meth:`save_data` to download raw bytes instead.
+        """
+        dt = self._check_data_type_supported()
+
+        if dt == "MultiLabelSegmentation":
+            raise NotImplementedError(
+                "MultiLabelSegmentation download is not yet implemented."
+            )
+
+        nrrd_source = self._download_raw_source()
+
+        if dt == "Image":
+            return self._get_data_image(nrrd_source, include_properties=include_properties)
+        else:
+            # Unreachable after _check_data_type_supported, but explicit.
+            raise UnsupportedDataTypeError(dt)
+
+    def _get_data_image(self, nrrd_source: bytes | str, *, include_properties: bool) -> Any:
+        """Deserialize NRRD data into an Image."""
+        image = _io.read_nrrd(nrrd_source)
+        if include_properties:
+            props = self.get_properties(scope=PropertyScope.DATA)
+            image._properties = props
+        return image
+
+    def _download_raw_source(self) -> bytes | str:
+        """Download raw data and return bytes or a file path.
+
+        For direct transfer mode the raw bytes are returned.
+        For file-reference mode the server-provided file path is returned.
+        """
+        resp = self._transport.get_binary(f"/datastorage/nodes/{self._uid}/data")
+        content_type = resp.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            body = resp.json()
+            return cast(str, body["transfer"]["file_path"])
+        return resp.content
+
+    def save_data(self, path: str | Path) -> Path:
+        """Download this node's data and save the raw bytes to a file.
+
+        This works for any data type, including types that cannot be
+        represented in Python (e.g. Surface, PointSet). The file is saved
+        in NRRD format as delivered by the server.
+
+        Args:
+            path: Destination file path. Parent directory must exist.
+
+        Returns:
+            The resolved Path that was written.
+        """
+        raw_source = self._download_raw_source()
+        dest = Path(path)
+        if isinstance(raw_source, str):
+            # file-reference mode: server provided a local path, copy it
+            dest.write_bytes(Path(raw_source).read_bytes())
+        else:
+            dest.write_bytes(raw_source)
+        return dest
+
+    def set_data(self, data: Any, *, include_properties: bool = False) -> None:
+        """Upload data to this node.
+
+        Accepts an :class:`~mitk_workbench_remote.image.Image`, a numpy
+        ndarray, or any type handled by the converter registry (e.g.
+        SimpleITK.Image, mlarray.MLArray). The transfer mode is chosen
+        automatically.
+
+        Args:
+            data: Pixel data or a convertible object.
+            include_properties: If ``True``, also upload the data's properties
+                as data-scope properties.
+
+        Raises:
+            UnsupportedDataTypeError: If the node's data type does not match
+                the data being uploaded.
+            TypeError: If no converter is registered for ``data``'s type.
+        """
+        from mitk_workbench_remote.converters import find_image_converter
+        from mitk_workbench_remote.image import Image
+
+        nrrd_bytes = self._resolve_serialized_bytes(data)
+
+        endpoint = f"/datastorage/nodes/{self._uid}/data"
+        mode = self._transport.transfer_mode
+
+        if mode == TransferMode.DIRECT:
+            self._transport.put_binary(
+                endpoint,
+                data=nrrd_bytes,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Content-Disposition": 'attachment; filename="data.nrrd"',
+                },
+            )
+
+        elif mode == TransferMode.FILE_REFERENCE:
+            tmp_dir = self._resolve_temp_dir()
+            tmp_path = Path(tmp_dir) / "upload.nrrd"
+            try:
+                tmp_path.write_bytes(nrrd_bytes)
+                self._transport.put_file_reference(endpoint, file_path=str(tmp_path))
+            finally:
+                tmp_path.unlink(missing_ok=True)
+        else:
+            raise RuntimeError("Cannot set data. Transfer mode requested by MITK via"
+                               f" transport layer is unknown. Unknown mode: {mode}")
+
+        if include_properties:
+            metadata: dict[str, Any] = {}
+            if isinstance(data, Image):
+                metadata = data.metadata
+            else:
+                converter = find_image_converter(data)
+                if converter is not None:
+                    metadata = converter.extract_metadata(data)
+            if metadata:
+                self.update_properties(PropertyScope.DATA, **metadata)
+
+    def _resolve_serialized_bytes(self, data: Any) -> bytes:
+        """Convert data to serialized bytes for upload.
+
+        Raises:
+            UnsupportedDataTypeError: If the data is a MultiLabelSegmentation
+                (not yet implemented).
+            TypeError: If no converter is registered for the data's type.
+        """
+        from mitk_workbench_remote import _io
+        from mitk_workbench_remote.converters import find_image_converter
+        from mitk_workbench_remote.image import Image
+
+        if isinstance(data, Image):
+            return _io.write_nrrd(data)
+        else:
+            image_converter = find_image_converter(data)
+            #it is a image data type directly passed. So handle it via converter
+            if image_converter is not None:
+                return image_converter.to_nrrd_bytes(data)
+
+        # MultiLabelSegmentation placeholder -- check before converter lookup
+        # so we give a clear error message instead of "no converter found".
+        try:
+            from mitk_workbench_remote.multilabel import MultiLabelSegmentation
+            if isinstance(data, MultiLabelSegmentation):
+                raise NotImplementedError(
+                    "MultiLabelSegmentation upload is not yet implemented."
+                )
+        except ImportError:
+            pass
+
+        raise TypeError(f"No converter found for {type(data).__name__}")
+
+    def _resolve_temp_dir(self) -> str:
+        """Choose a temp directory for file-reference uploads.
+
+        If file-access restrictions are active, uses the first allowed path.
+        Otherwise uses the system temp directory.
+        """
+        config = self._transport.file_access_config
+        if config.restrictions_active and config.allowed_paths:
+            return config.allowed_paths[0]
+        return tempfile.gettempdir()
 
     # ------------------------------------------------------------------
     # Rendering

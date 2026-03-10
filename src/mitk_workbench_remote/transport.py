@@ -136,6 +136,11 @@ class RestResponse:
         """
         return self._response.text
 
+    @property
+    def headers(self) -> dict[str, str]:
+        """Response headers as a plain dict."""
+        return dict(self._response.headers)
+
     def json(self) -> Any:
         """Parse and return the JSON response body."""
         return self._response.json()
@@ -270,6 +275,13 @@ class RestTransport:
     def put_binary(self, path: str, data: bytes, **kwargs: Any) -> RestResponse:
         """Send a PUT request with raw bytes as the body."""
         return self._request("PUT", path, data=data, **kwargs)
+
+    def put_file_reference(self, path: str, *, file_path: str, **kwargs: Any) -> RestResponse:
+        """Send a PUT with file-reference transfer mode (JSON body with file path)."""
+        body = {"transfer": {"mode": "file-reference", "file_path": file_path}}
+        headers = kwargs.pop("headers", {})
+        headers["Content-Type"] = "application/json"
+        return self._request("PUT", path, json=body, headers=headers, **kwargs)
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -21,7 +21,7 @@
 Classes:
     MultiLabelSegmentation: Container of label groups backed by a 4D numpy array.
         Label values are globally unique across all groups; value 0 is reserved.
-        Supports group-level image access, label metadata editing, and value remapping.
+        Supports group-level image access, label properties editing, and value remapping.
     LabelGroup: A named collection of labels within a MultiLabelSegmentation.
     Label: A single label with value, name, color, opacity, visibility, and lock state.
 """

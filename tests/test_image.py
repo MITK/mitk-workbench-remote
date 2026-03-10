@@ -18,7 +18,201 @@
 
 """Tests for image.py."""
 
+from unittest.mock import MagicMock, patch
 
-def test_placeholder() -> None:
-    """Remove once real tests are added."""
-    pass
+import numpy as np
+import pytest
+
+from mitk_workbench_remote.image import Image
+
+# ---------------------------------------------------------------------------
+# Construction from ndarray
+# ---------------------------------------------------------------------------
+
+
+def test_image_from_ndarray_stores_array() -> None:
+    arr = np.zeros((3, 4, 5))
+    img = Image(arr)
+    assert img.array is arr
+
+
+def test_image_default_spacing() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert img.spacing == (1.0, 1.0, 1.0)
+
+
+def test_image_default_origin() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert img.origin == (0.0, 0.0, 0.0)
+
+
+def test_image_default_direction() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    np.testing.assert_array_equal(img.direction, np.eye(3))
+
+
+def test_image_custom_spacing() -> None:
+    img = Image(np.zeros((3, 4, 5)), spacing=(0.5, 1.0, 2.0))
+    assert img.spacing == (0.5, 1.0, 2.0)
+
+
+def test_image_custom_origin() -> None:
+    img = Image(np.zeros((3, 4, 5)), origin=(10.0, 20.0, 30.0))
+    assert img.origin == (10.0, 20.0, 30.0)
+
+
+def test_image_custom_direction() -> None:
+    d = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=np.float64)
+    img = Image(np.zeros((3, 4, 5)), direction=d)
+    np.testing.assert_array_equal(img.direction, d)
+
+
+def test_image_default_metadata_is_empty_dict() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert img.metadata == {}
+
+
+def test_image_custom_metadata() -> None:
+    meta = {"key1": "value1", "key2": 42}
+    img = Image(np.zeros((3, 4, 5)), properties=meta)
+    assert img.metadata == meta
+
+
+# ---------------------------------------------------------------------------
+# Properties
+# ---------------------------------------------------------------------------
+
+
+def test_image_ndim() -> None:
+    assert Image(np.zeros((3, 4, 5))).ndim == 3
+    assert Image(np.zeros((10, 20))).ndim == 2
+
+
+def test_image_shape() -> None:
+    assert Image(np.zeros((3, 4, 5))).shape == (3, 4, 5)
+
+
+def test_image_dtype() -> None:
+    assert Image(np.zeros((3,), dtype=np.float32)).dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# Lazy conversion via converter
+# ---------------------------------------------------------------------------
+
+
+def test_image_from_converter_lazy_array() -> None:
+    """Array is not materialized until .array is accessed."""
+    mock_converter = MagicMock()
+    mock_converter.can_handle.return_value = True
+    mock_converter.extract_geometry.return_value = {"spacing": (1.0, 1.0, 1.0)}
+    mock_converter.extract_metadata.return_value = {}
+    mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
+
+    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+        img = Image("fake_data")
+        mock_converter.to_ndarray.assert_not_called()
+        _ = img.array
+        mock_converter.to_ndarray.assert_called_once()
+
+
+def test_image_from_converter_extracts_geometry() -> None:
+    mock_converter = MagicMock()
+    mock_converter.can_handle.return_value = True
+    mock_converter.extract_geometry.return_value = {
+        "spacing": (0.5, 1.0, 2.0),
+        "origin": (10.0, 20.0, 30.0),
+    }
+    mock_converter.extract_metadata.return_value = {"my_key": "my_value"}
+    mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
+
+    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+        img = Image("fake_data")
+        assert img.spacing == (0.5, 1.0, 2.0)
+        assert img.origin == (10.0, 20.0, 30.0)
+        assert img.metadata == {"my_key": "my_value"}
+
+
+def test_image_explicit_kwargs_override_converter_geometry() -> None:
+    mock_converter = MagicMock()
+    mock_converter.can_handle.return_value = True
+    mock_converter.extract_geometry.return_value = {
+        "spacing": (0.5, 1.0, 2.0),
+        "origin": (10.0, 20.0, 30.0),
+    }
+    mock_converter.extract_metadata.return_value = {"extracted": True}
+    mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
+
+    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+        img = Image("fake_data", spacing=(2.0, 2.0, 2.0), properties={"custom": True})
+        assert img.spacing == (2.0, 2.0, 2.0)
+        assert img.origin == (10.0, 20.0, 30.0)  # not overridden
+        assert img.metadata == {"custom": True}  # overridden
+
+
+def test_image_unsupported_type_raises_TypeError() -> None:
+    with pytest.raises(TypeError, match="No converter found"):
+        Image(object())
+
+
+# ---------------------------------------------------------------------------
+# Conversion methods
+# ---------------------------------------------------------------------------
+
+
+def test_to_numpy_returns_array() -> None:
+    arr = np.arange(12).reshape(3, 4)
+    img = Image(arr)
+    assert img.to_numpy() is arr
+
+
+# ---------------------------------------------------------------------------
+# Equality
+# ---------------------------------------------------------------------------
+
+
+def test_image_equality_same() -> None:
+    arr = np.arange(6).reshape(2, 3)
+    img1 = Image(arr, spacing=(1.0, 2.0))
+    img2 = Image(arr.copy(), spacing=(1.0, 2.0))
+    assert img1 == img2
+
+
+def test_image_inequality_different_array() -> None:
+    img1 = Image(np.zeros((2, 3)))
+    img2 = Image(np.ones((2, 3)))
+    assert img1 != img2
+
+
+def test_image_inequality_different_spacing() -> None:
+    arr = np.zeros((2, 3))
+    img1 = Image(arr, spacing=(1.0, 1.0))
+    img2 = Image(arr.copy(), spacing=(2.0, 2.0))
+    assert img1 != img2
+
+
+def test_image_inequality_different_origin() -> None:
+    arr = np.zeros((2, 3))
+    img1 = Image(arr, origin=(0.0, 0.0))
+    img2 = Image(arr.copy(), origin=(1.0, 1.0))
+    assert img1 != img2
+
+
+def test_image_eq_not_implemented_for_other_types() -> None:
+    img = Image(np.zeros((2, 3)))
+    assert img.__eq__("not an image") is NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# Repr
+# ---------------------------------------------------------------------------
+
+
+def test_repr_includes_shape() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert "(3, 4, 5)" in repr(img)
+
+
+def test_repr_includes_spacing() -> None:
+    img = Image(np.zeros((3, 4, 5)), spacing=(0.5, 1.0, 2.0))
+    assert "(0.5, 1.0, 2.0)" in repr(img)

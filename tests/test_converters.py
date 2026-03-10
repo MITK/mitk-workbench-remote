@@ -18,7 +18,79 @@
 
 """Tests for converters/."""
 
+import numpy as np
 
-def test_placeholder() -> None:
-    """Remove once real tests are added."""
-    pass
+from mitk_workbench_remote.converters import find_image_converter, find_converter_for_type
+from mitk_workbench_remote.converters._numpy import NumpyConverter
+from mitk_workbench_remote.image import Image
+
+# ---------------------------------------------------------------------------
+# find_image_converter
+# ---------------------------------------------------------------------------
+
+
+def test_find_converter_ndarray() -> None:
+    arr = np.zeros((3, 4, 5))
+    converter = find_image_converter(arr)
+    assert converter is not None
+    assert isinstance(converter, NumpyConverter)
+
+
+def test_find_converter_unknown_type_returns_none() -> None:
+    assert find_image_converter(42) is None
+    assert find_image_converter(object()) is None
+    assert find_image_converter("some_string") is None
+
+
+# ---------------------------------------------------------------------------
+# find_converter_for_type
+# ---------------------------------------------------------------------------
+
+
+def test_find_converter_for_type_ndarray() -> None:
+    converter = find_converter_for_type(np.ndarray)
+    assert converter is not None
+    assert isinstance(converter, NumpyConverter)
+
+
+# ---------------------------------------------------------------------------
+# NumpyConverter
+# ---------------------------------------------------------------------------
+
+
+def test_numpy_converter_can_handle() -> None:
+    c = NumpyConverter()
+    assert c.can_handle(np.zeros(3))
+    assert not c.can_handle([1, 2, 3])
+
+
+def test_numpy_converter_extract_geometry_empty() -> None:
+    c = NumpyConverter()
+    assert c.extract_geometry(np.zeros(3)) == {}
+
+
+def test_numpy_converter_extract_metadata_empty() -> None:
+    c = NumpyConverter()
+    assert c.extract_metadata(np.zeros(3)) == {}
+
+
+def test_numpy_converter_to_ndarray_returns_same_object() -> None:
+    c = NumpyConverter()
+    arr = np.zeros(3)
+    assert c.to_ndarray(arr) is arr
+
+
+def test_numpy_converter_roundtrip_via_nrrd() -> None:
+    c = NumpyConverter()
+    arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    nrrd_bytes = c.to_nrrd_bytes(arr)
+    assert isinstance(nrrd_bytes, bytes)
+    assert len(nrrd_bytes) > 0
+
+
+def test_numpy_converter_from_image() -> None:
+    c = NumpyConverter()
+    arr = np.arange(6).reshape(2, 3)
+    img = Image(arr)
+    result = c.from_image(img)
+    assert result is arr

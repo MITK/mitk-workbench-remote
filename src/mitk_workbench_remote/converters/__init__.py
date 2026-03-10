@@ -16,16 +16,100 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Converter registry — maps Python types to NRRD I/O operations.
+"""Converter registry -- maps Python types to NRRD I/O operations.
 
 Functions:
     register_converter: Register a new ImageConverter for a custom type.
-    find_converter: Look up the converter for a given object by type.
+    find_image_converter: Look up the converter for a given object by type.
+    find_converter_for_type: Reverse lookup -- find converter that produces a target type.
 
 Built-in converters (registered at import time):
-    NumpyConverter: numpy.ndarray ↔ NRRD (always available).
-    ImageConverter: Image ↔ NRRD (always available).
-    FilePathConverter: str/Path → file-reference upload (always available).
-    SitkConverter: SimpleITK.Image ↔ Image (registered if SimpleITK is installed).
-    MLArrayConverter: mlarray.MLArray ↔ Image (registered if mlarray is installed).
+    NumpyConverter: numpy.ndarray (always available).
+    SitkConverter: SimpleITK.Image (registered if SimpleITK is installed).
+    MLArrayConverter: mlarray.MLArray (registered if mlarray is installed).
 """
+
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
+
+
+@runtime_checkable
+class ImageConverter(Protocol):
+    """Protocol for converting between external image types and Image."""
+
+    def can_handle(self, obj: Any) -> bool:
+        """Return True if this converter can handle the given object."""
+        ...
+
+    def extract_geometry(self, obj: Any) -> dict[str, Any]:
+        """Extract spatial geometry (spacing, origin, direction) from the object."""
+        ...
+
+    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+        """Extract custom properties/properties from the object."""
+        ...
+
+    def to_ndarray(self, obj: Any) -> np.ndarray:
+        """Convert the object's pixel data to a numpy array."""
+        ...
+
+    def to_nrrd_bytes(self, obj: Any) -> bytes:
+        """Serialize the object to NRRD bytes for upload."""
+        ...
+
+    def from_image(self, image: Any) -> Any:
+        """Convert an Image to the target type."""
+        ...
+
+    @property
+    def target_type(self) -> type | None:
+        """The type this converter produces via from_image, or None."""
+        ...
+
+
+_converters: list[ImageConverter] = []
+
+
+def register_converter(converter: ImageConverter) -> None:
+    """Register a new ImageConverter."""
+    _converters.append(converter)
+
+
+def find_image_converter(obj: Any) -> ImageConverter | None:
+    """Find the first converter that can handle the given object."""
+    for converter in _converters:
+        if converter.can_handle(obj):
+            return converter
+    return None
+
+
+def find_converter_for_type(target_type: type) -> ImageConverter | None:
+    """Find a converter that produces the given target type via from_image."""
+    for converter in _converters:
+        if converter.target_type is not None and issubclass(converter.target_type, target_type):
+            return converter
+    return None
+
+
+# --- Auto-register built-in converters ---
+
+from mitk_workbench_remote.converters._numpy import NumpyConverter  # noqa: E402
+
+register_converter(NumpyConverter())
+
+try:
+    from mitk_workbench_remote.converters._simpleitk import SitkConverter
+
+    register_converter(SitkConverter())
+except ImportError:
+    pass
+
+try:
+    from mitk_workbench_remote.converters._mlarray import MLArrayConverter
+
+    register_converter(MLArrayConverter())
+except ImportError:
+    pass

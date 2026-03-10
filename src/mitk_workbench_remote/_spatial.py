@@ -16,10 +16,91 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared geometry helpers — used by both Image and MultiLabelSegmentation.
+"""Shared geometry helpers -- used by both Image and MultiLabelSegmentation."""
 
-Functions:
-    _normalize_spacing: Normalize spacing to a tuple of floats; defaults to (1.0, ...).
-    _normalize_origin: Normalize origin to a tuple of floats; defaults to (0.0, ...).
-    _normalize_direction: Normalize direction to an ndim x ndim identity-defaulting matrix.
-"""
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+import numpy as np
+
+
+def _normalize_spacing(
+    spacing: Sequence[float] | np.ndarray | None,
+    *,
+    ndim: int,
+) -> tuple[float, ...]:
+    """Normalize spacing to a tuple of floats.
+
+    Args:
+        spacing: Input spacing. ``None`` defaults to ``(1.0, ...)``.
+        ndim: Expected number of dimensions.
+
+    Returns:
+        Tuple of floats with length ``ndim``.
+
+    Raises:
+        ValueError: If the length does not match ``ndim``.
+    """
+    if spacing is None:
+        return tuple(1.0 for _ in range(ndim))
+    result = tuple(float(s) for s in spacing)
+    if len(result) != ndim:
+        raise ValueError(f"spacing has length {len(result)}, expected {ndim}")
+    return result
+
+
+def _normalize_origin(
+    origin: Sequence[float] | np.ndarray | None,
+    *,
+    ndim: int,
+) -> tuple[float, ...]:
+    """Normalize origin to a tuple of floats.
+
+    Args:
+        origin: Input origin. ``None`` defaults to ``(0.0, ...)``.
+        ndim: Expected number of dimensions.
+
+    Returns:
+        Tuple of floats with length ``ndim``.
+
+    Raises:
+        ValueError: If the length does not match ``ndim``.
+    """
+    if origin is None:
+        return tuple(0.0 for _ in range(ndim))
+    result = tuple(float(o) for o in origin)
+    if len(result) != ndim:
+        raise ValueError(f"origin has length {len(result)}, expected {ndim}")
+    return result
+
+
+def _normalize_direction(
+    direction: Sequence[Any] | np.ndarray | None,
+    *,
+    ndim: int,
+) -> np.ndarray:
+    """Normalize direction to an ndim x ndim float64 matrix.
+
+    Args:
+        direction: Input direction matrix. ``None`` defaults to the identity matrix.
+            Accepts flat sequences (length ndim*ndim), nested sequences, or ndarrays.
+        ndim: Expected number of dimensions.
+
+    Returns:
+        Float64 ndarray with shape ``(ndim, ndim)``.
+
+    Raises:
+        ValueError: If the shape cannot be reshaped to ``(ndim, ndim)``.
+    """
+    if direction is None:
+        return np.eye(ndim, dtype=np.float64)
+    arr = np.asarray(direction, dtype=np.float64)
+    if arr.ndim == 1:
+        if arr.shape[0] != ndim * ndim:
+            raise ValueError(f"flat direction has length {arr.shape[0]}, expected {ndim * ndim}")
+        arr = arr.reshape(ndim, ndim)
+    if arr.shape != (ndim, ndim):
+        raise ValueError(f"direction has shape {arr.shape}, expected ({ndim}, {ndim})")
+    return arr

@@ -16,10 +16,197 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Image — universal spatial image type for mitk-workbench-remote.
+from __future__ import annotations
 
-Classes:
-    Image: Spatial image backed by a numpy array with spacing, origin, and direction metadata.
-        Provides conversions to/from SimpleITK and mlarray. Used everywhere a spatial image
-        is needed: node.get_data(), seg.get_group_image(), wb.show(), node.set_data().
-"""
+from collections.abc import Sequence
+from typing import Any
+
+import numpy as np
+
+from mitk_workbench_remote._spatial import (
+    _normalize_direction,
+    _normalize_origin,
+    _normalize_spacing,
+)
+
+class Image:
+    """Spatial image wrapper backed by a numpy array with spacing, origin, and direction.
+
+    Accepts any type handled by the converter registry (ndarray, SimpleITK.Image,
+    mlarray.MLArray, file path). Pixel data conversion is lazy -- the array is
+    only materialized on first access to :attr:`array`.
+
+    Args:
+        data: Pixel data or an object convertible via the converter registry.
+        spacing: Voxel spacing. Overrides converter-extracted values. Defaults
+            to ``(1.0, ...)`` per dimension.
+        origin: World-space origin. Overrides converter-extracted values.
+            Defaults to ``(0.0, ...)``.
+        direction: Direction cosine matrix. Overrides converter-extracted values.
+            Defaults to the identity matrix.
+        properties: Data-scope properties/metadata dict. If ``None`` and a converter
+            is used, metadata is extracted from the source object.
+    """
+
+    def __init__(
+        self,
+        data: Any,
+        *,
+        spacing: Sequence[float] | np.ndarray | None = None,
+        origin: Sequence[float] | np.ndarray | None = None,
+        direction: Sequence[Any] | np.ndarray | None = None,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        if isinstance(data, np.ndarray):
+            self._array: np.ndarray | None = data
+            self._source_data: Any = None
+            self._converter: Any = None
+            ndim = data.ndim
+            geo_defaults: dict[str, Any] = {}
+            properties_defaults: dict[str, Any] = {}
+        else:
+            from mitk_workbench_remote.converters import find_image_converter
+
+            converter = find_image_converter(data)
+            if converter is None:
+                raise TypeError(
+                    f"No converter found for {type(data).__name__}. "
+                    f"Pass a numpy array or register a converter."
+                )
+            self._array = None
+            self._source_data = data
+            self._converter = converter
+            geo_defaults = converter.extract_geometry(data)
+            properties_defaults = converter.extract_metadata(data)
+            # Need ndim: try to get from geometry, else materialize array
+            if "spacing" in geo_defaults:
+                ndim = len(geo_defaults["spacing"])
+            elif "origin" in geo_defaults:
+                ndim = len(geo_defaults["origin"])
+            else:
+                ndim = self.array.ndim
+
+        self._spacing = _normalize_spacing(
+            spacing if spacing is not None else geo_defaults.get("spacing"),
+            ndim=ndim,
+        )
+        self._origin = _normalize_origin(
+            origin if origin is not None else geo_defaults.get("origin"),
+            ndim=ndim,
+        )
+        self._direction = _normalize_direction(
+            direction if direction is not None else geo_defaults.get("direction"),
+            ndim=ndim,
+        )
+        self._properties = properties if properties is not None else properties_defaults
+
+    def __repr__(self) -> str:
+        return f"Image(shape={self.shape}, dtype={self.dtype}, spacing={self._spacing})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Image):
+            return NotImplemented
+        return (
+            np.array_equal(self.array, other.array)
+            and self._spacing == other._spacing
+            and self._origin == other._origin
+            and np.array_equal(self._direction, other._direction)
+        )
+
+    # ------------------------------------------------------------------
+    # Lazy array access
+    # ------------------------------------------------------------------
+
+    @property
+    def array(self) -> np.ndarray:
+        """Pixel data as a numpy array. Materialized lazily on first access."""
+        if self._array is None:
+            self._array = self._converter.to_ndarray(self._source_data)
+        return self._array
+
+    # ------------------------------------------------------------------
+    # Spatial properties
+    # ------------------------------------------------------------------
+
+    @property
+    def spacing(self) -> tuple[float, ...]:
+        """Voxel spacing per dimension."""
+        return self._spacing
+
+    @property
+    def origin(self) -> tuple[float, ...]:
+        """World-space origin."""
+        return self._origin
+
+    @property
+    def direction(self) -> np.ndarray:
+        """Direction cosine matrix (ndim x ndim, float64)."""
+        return self._direction
+
+    @property
+    def ndim(self) -> int:
+        """Number of spatial dimensions."""
+        return len(self._spacing)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Array shape."""
+        return self.array.shape
+
+    @property
+    def dtype(self) -> np.dtype[Any]:
+        """Array data type."""
+        return self.array.dtype
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Data-scope properties/properties."""
+        return self._properties
+
+    # ------------------------------------------------------------------
+    # Conversion methods
+    # ------------------------------------------------------------------
+
+    def to_numpy(self) -> np.ndarray:
+        """Return pixel data as a numpy array."""
+        return self.array
+
+    def to_simpleitk(self) -> Any:
+        """Convert to a SimpleITK Image.
+
+        Raises:
+            ImportError: If SimpleITK is not installed.
+        """
+        try:
+            import SimpleITK
+        except ImportError:
+            raise ImportError(
+                "SimpleITK is required for to_simpleitk(). Install it with: pip install SimpleITK"
+            ) from None
+
+        from mitk_workbench_remote.converters import find_converter_for_type
+
+        converter = find_converter_for_type(SimpleITK.Image)
+        if converter is None:
+            raise ImportError("SitkConverter is not registered")
+        return converter.from_image(self)
+
+    def to_mlarray(self) -> Any:
+        """Convert to an mlarray.MLArray.
+
+        Raises:
+            ImportError: If mlarray is not installed.
+        """
+        try:
+            import mlarray
+        except ImportError:
+            raise ImportError(
+                "mlarray is required for to_mlarray(). Install it with: pip install mlarray"
+            ) from None
+
+        from mitk_workbench_remote.converters import find_converter_for_type
+
+        converter = find_converter_for_type(mlarray.MLArray)
+        if converter is None:
+            raise ImportError("MLArrayConverter is not registered")
+        return converter.from_image(self)

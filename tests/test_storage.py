@@ -24,7 +24,7 @@ import pytest
 import responses
 
 from mitk_workbench_remote import errors
-from mitk_workbench_remote.node import DataNode
+from mitk_workbench_remote.node import DataNode, PropertyScope
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport
 
@@ -156,6 +156,169 @@ def test_list_paginates_when_results_exceed_one_page() -> None:
     assert "limit=1000" in responses.calls[0].request.url
     assert "offset=0" in responses.calls[0].request.url
     assert "offset=2" in responses.calls[1].request.url
+
+
+# ---------------------------------------------------------------------------
+# filter
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_filter_returns_data_nodes() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    nodes = storage.filter(properties={"visible": True})
+    assert len(nodes) == 1
+    assert isinstance(nodes[0], DataNode)
+
+
+@responses.activate
+def test_filter_by_data_type() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(data_type="Image")
+    assert "data_type=Image" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_by_toplevel() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(toplevel=True)
+    assert "hierarchy=toplevel" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_by_parent_uid() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(parent_uid="node_0")
+    assert "parent_uid=node_0" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_property_bool_serialized_to_lowercase() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"visible": True})
+    assert "filter.visible=true" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_property_string_passes_through_with_wildcard() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"name": "CT*"})
+    assert "filter.name=CT%2A" in responses.calls[0].request.url or "filter.name=CT*" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_property_color_serialized_as_json() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"color": (1.0, 0.0, 0.0)})
+    url = responses.calls[0].request.url
+    assert "filter.color=" in url
+
+
+@responses.activate
+def test_filter_passes_property_scope_when_properties_given() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"visible": True}, scope=PropertyScope.NODE)
+    assert "property_scope=node" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_omits_property_scope_when_no_properties() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(data_type="Image")
+    assert "property_scope=" not in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_passes_context_when_properties_given() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"visible": True}, context="renderer1")
+    assert "context=renderer1" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_omits_context_when_none() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(properties={"visible": True})
+    assert "context=" not in responses.calls[0].request.url
+
+
+@responses.activate
+def test_filter_omits_context_when_no_properties() -> None:
+    storage = _make_storage()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json=_list_response(_node_dict()),
+        status=200,
+    )
+    storage.filter(context="renderer1")
+    assert "context=" not in responses.calls[0].request.url
 
 
 # ---------------------------------------------------------------------------

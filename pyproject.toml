@@ -78,6 +78,18 @@ warn_unused_configs = true
 module = "requests.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "nrrd"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "SimpleITK.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mlarray.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
