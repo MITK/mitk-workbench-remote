@@ -16,8 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workbench handle — primary entry point for controlling a MITK Workbench instance.
-"""
+"""Workbench handle — primary entry point for controlling a MITK Workbench instance."""
 
 from __future__ import annotations
 
@@ -113,7 +112,8 @@ class Workbench:
 
     @property
     def is_launched_remotely(self) -> bool:
-        """Returns if the workbench was launched remotely (true) or was just connected to but is independent (false)."""
+        """Returns if the workbench was launched remotely (true) or was just connected to but is
+         independent (false)."""
         return self._process is not None
 
     @property
@@ -185,9 +185,7 @@ class Workbench:
             MitkError: If this instance was not created by ``launch()``.
         """
         if self._process is None:
-            raise errors.MitkError(
-                "shutdown() is only valid for instances started with launch()"
-            )
+            raise errors.MitkError("shutdown() is only valid for instances started with launch()")
 
         if sys.platform == "win32":
             # Find the process actually listening on the REST port — this may

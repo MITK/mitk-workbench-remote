@@ -24,6 +24,7 @@ Fixtures:
 """
 
 from collections.abc import Generator
+from typing import Any
 
 import pytest
 import responses as responses_lib

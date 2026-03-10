@@ -16,8 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DataStorage wrapper — Pythonic access to the MITK DataStorage.
-"""
+"""DataStorage wrapper — Pythonic access to the MITK DataStorage."""
 
 from mitk_workbench_remote.transport import RestTransport
 

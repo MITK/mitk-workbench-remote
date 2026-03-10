@@ -591,8 +591,7 @@ def test_shutdown_wrapper_kills_both_listener_and_wrapper(tmp_path: Path) -> Non
 
     # Simulate netstat: listener PID (99999) differs from wrapper PID (12345)
     netstat_output = (
-        f"  TCP    127.0.0.1:{port}         0.0.0.0:0"
-        "              LISTENING       99999\n"
+        f"  TCP    127.0.0.1:{port}         0.0.0.0:0              LISTENING       99999\n"
     )
     mock_netstat = MagicMock(stdout=netstat_output)
 
@@ -612,9 +611,7 @@ def test_shutdown_wrapper_kills_both_listener_and_wrapper(tmp_path: Path) -> Non
     mock_proc.communicate.assert_called()
 
     if sys.platform == "win32":
-        taskkill_calls = [
-            c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"
-        ]
+        taskkill_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"]
         assert len(taskkill_calls) == 2
         killed_pids = [c[0][0][-1] for c in taskkill_calls]
         assert "99999" in killed_pids  # real Workbench
@@ -646,8 +643,7 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
 
     # Simulate netstat: listener PID matches Popen PID (same process)
     netstat_output = (
-        f"  TCP    127.0.0.1:{port}         0.0.0.0:0"
-        "              LISTENING       55555\n"
+        f"  TCP    127.0.0.1:{port}         0.0.0.0:0              LISTENING       55555\n"
     )
     mock_netstat = MagicMock(stdout=netstat_output)
 
@@ -667,9 +663,7 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
     mock_proc.communicate.assert_called()
 
     if sys.platform == "win32":
-        taskkill_calls = [
-            c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"
-        ]
+        taskkill_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"]
         # Only one taskkill — no duplicate for the same PID
         assert len(taskkill_calls) == 1
         assert taskkill_calls[0][0][0][-1] == "55555"
