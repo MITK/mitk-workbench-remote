@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import warnings
 from dataclasses import dataclass
 from types import TracebackType
 from urllib.parse import urlparse
@@ -196,17 +197,33 @@ class Workbench:
             if port is not None:
                 listener_pid = _find_listening_pid(port)
                 if listener_pid is not None:
-                    subprocess.run(
+                    result = subprocess.run(
                         ["taskkill", "/F", "/T", "/PID", str(listener_pid)],
                         capture_output=True,
+                        text=True,
                     )
+                    if result.returncode != 0:
+                        warnings.warn(
+                            f"taskkill /PID {listener_pid} failed (code {result.returncode}): "
+                            f"{result.stderr.strip()}",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
             # Also kill the wrapper process tree, unless it IS the listener
             # (no wrapper — MITK was started directly).
             if listener_pid != self._process.pid:
-                subprocess.run(
+                result = subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(self._process.pid)],
                     capture_output=True,
+                    text=True,
                 )
+                if result.returncode != 0:
+                    warnings.warn(
+                        f"taskkill /PID {self._process.pid} failed (code {result.returncode}): "
+                        f"{result.stderr.strip()}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
         else:
             self._process.terminate()
 

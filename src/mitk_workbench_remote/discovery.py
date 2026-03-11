@@ -39,7 +39,7 @@ from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench
 
 _PREFERENCE_PATCH_FLAG: str = "--MITK.preferences-override"
-_EXECUTABLE_ENV_VAR: str = "MITK_WORKBENCH_REMOTE"
+_EXECUTABLE_ENV_VAR: str = "MITK_WORKBENCH"
 
 
 def _build_prefs_xml(port: int, token: str) -> str:
@@ -92,6 +92,9 @@ def discover(
         except (errors.MitkError, OSError):
             transport.close()
             return port, None
+        except Exception:
+            transport.close()
+            raise
 
     results: list[tuple[int, Workbench]] = []
     with ThreadPoolExecutor(max_workers=max(1, min(len(port_list), 64))) as executor:
@@ -204,7 +207,7 @@ def launch(
             f.write(_build_prefs_xml(port, token))
 
         # We use the file option and not the direct xml content passing for security
-        # reasons to avoid that the API key can be querried via the process informations
+        # reasons to avoid that the API key can be queried via the process informations
         cmd: list[str] = [str(resolved_exe), _PREFERENCE_PATCH_FLAG, f"@{prefs_path}"]
         if extra_args:
             cmd.extend(extra_args)
@@ -220,18 +223,22 @@ def launch(
         try:
             while True:
                 returncode = process.poll()
-                if returncode is not None and returncode != 0:
-                    assert process.stderr is not None  # always piped (stderr=subprocess.PIPE)
-                    stderr_text = process.stderr.read().decode("utf-8", errors="replace")
-                    if "Cannot apply preferences" in stderr_text:
+                if returncode is not None:
+                    if returncode != 0:
+                        assert process.stderr is not None  # always piped (stderr=subprocess.PIPE)
+                        stderr_text = process.stderr.read().decode("utf-8", errors="replace")
+                        if "Cannot apply preferences" in stderr_text:
+                            raise errors.MitkError(
+                                f"MITK Workbench exited with code {returncode}: failed to apply "
+                                "preference overrides. If this is a fresh installation, please"
+                                " start the Workbench manually once to initialise its"
+                                " preferences store, then try again."
+                            )
                         raise errors.MitkError(
-                            f"MITK Workbench exited with code {returncode}: failed to apply "
-                            "preference overrides. If this is a fresh installation, please start "
-                            "the Workbench manually once to initialise its preferences store, "
-                            "then try again."
+                            f"MITK Workbench process exited unexpectedly with code {returncode}."
                         )
                     raise errors.MitkError(
-                        f"MITK Workbench process exited unexpectedly with code {returncode}."
+                        "MITK Workbench process exited unexpectedly with code 0."
                     )
                 try:
                     transport.get("/health")
@@ -241,7 +248,7 @@ def launch(
                 if time.monotonic() >= deadline:
                     break
                 time.sleep(0.5)
-        except:
+        except BaseException:
             process.terminate()
             transport.close()
             raise
