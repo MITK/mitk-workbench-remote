@@ -16,8 +16,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DataStorage wrapper — Pythonic access to the MITK DataStorage.
+"""DataStorage wrapper — Pythonic access to the MITK DataStorage."""
 
-Classes:
-    DataStorage: CRUD interface for DataNode objects (list, get, create, iterate, delete).
-"""
+from mitk_workbench_remote.transport import RestTransport
+
+
+class DataStorage:
+    """CRUD interface for DataNode objects (full implementation in T6).
+
+    Args:
+        transport: The REST transport used for all HTTP calls.
+    """
+
+    def __init__(self, transport: RestTransport) -> None:
+        self._transport = transport

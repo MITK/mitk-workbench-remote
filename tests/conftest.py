@@ -21,16 +21,16 @@
 Fixtures:
     mock_transport: RestTransport with all HTTP calls mocked via responses.
     mock_workbench: Workbench connected to a mocked transport.
-    sample_nrrd_bytes: NRRD file bytes for a simple 3D image.
-    sample_multilabel_nrrd_bytes: NRRD file bytes for a MultiLabel segmentation.
 """
 
 from collections.abc import Generator
+from typing import Any
 
 import pytest
 import responses as responses_lib
 
 from mitk_workbench_remote.transport import RestTransport
+from mitk_workbench_remote.workbench import Workbench
 
 
 @pytest.fixture
@@ -39,3 +39,16 @@ def mock_transport() -> Generator[tuple[RestTransport, responses_lib.RequestsMoc
     with responses_lib.RequestsMock() as rsps:
         transport = RestTransport("http://127.0.0.1:8080", token="test-token")
         yield transport, rsps
+
+
+@pytest.fixture
+def mock_workbench() -> Generator[tuple[Workbench, Any], None, None]:
+    """Workbench connected to a mocked transport (transfer_mode=direct, no auto-detect)."""
+    with responses_lib.RequestsMock() as rsps:
+        transport = RestTransport(
+            "http://127.0.0.1:8080",
+            token="test-token",
+            transfer_mode="direct",
+        )
+        wb = Workbench(transport)
+        yield wb, rsps

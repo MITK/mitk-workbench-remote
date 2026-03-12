@@ -74,7 +74,6 @@
                 "example": {
                   "data": {
                     "name": "MITK Workbench REST API",
-                    "version": "1.0.0",
                     "api_version": "v1",
                     "mitk_version": "2026.02.0",
                     "documentation_url": "https://docs.mitk.org/api/v1",
@@ -155,7 +154,6 @@
                 "example": {
                   "data": {
                     "name": "MITK Workbench REST API",
-                    "version": "1.0.0",
                     "api_version": "v1",
                     "mitk_version": "2026.02.0",
                     "documentation_url": "https://docs.mitk.org/api/v1",
@@ -579,6 +577,26 @@
           },
           "404": {
             "$ref": "#/components/responses/NodeNotFound"
+          },
+          "409": {
+            "description": "Reparenting would create a circular hierarchy reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "type": "https://docs.mitk.org/api/errors/CIRCULAR_HIERARCHY_REFERENCE",
+                    "code": "CIRCULAR_HIERARCHY_REFERENCE",
+                    "title": "Circular Hierarchy Reference",
+                    "message": "Cannot reparent node: the target parent is a descendant of this node",
+                    "status": 409,
+                    "instance": "/api/v1/datastorage/nodes/node-001"
+                  }
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -1856,6 +1874,26 @@
           },
           "400": {
             "$ref": "#/components/responses/InvalidRequest"
+          },
+          "422": {
+            "description": "An unexpected error occurred in the rendering framework",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "type": "https://docs.mitk.org/api/errors/RENDERING_ERROR",
+                    "code": "RENDERING_ERROR",
+                    "title": "Rendering Error",
+                    "message": "Rendering operation failed: ...",
+                    "status": 422,
+                    "instance": "/api/v1/rendering/update"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1865,8 +1903,8 @@
         "tags": [
           "Rendering"
         ],
-        "summary": "Reinit — fit all views to visible data or a specific node",
-        "description": "Without a request body: fits all render windows to the bounding box of all currently visible data nodes via `RenderingManager::InitializeViewsByBoundingObjects()`. With a JSON body containing a `uid` field: fits all render windows to the geometry of that specific node via `RenderingManager::InitializeViews()`. Equivalent to clicking the global reinit button in the Workbench.",
+        "summary": "Reinit — fit all views to visible data or specific nodes",
+        "description": "Three operating modes: (1) No body — global reinit, fits all render windows to the bounding box of all currently visible data nodes via `RenderingManager::InitializeViewsByBoundingObjects()`. (2) Body with `uids` containing one UID — single-node reinit, fits render windows to the geometry of that node. (3) Body with `uids` containing multiple UIDs — multi-node reinit, fits render windows to the combined bounding geometry of all listed nodes. Both node cases use `RenderingManager::InitializeViews()`. Equivalent to clicking the global reinit button in the Workbench.",
         "operationId": "postRenderingReinit",
         "requestBody": {
           "required": false,
@@ -1875,10 +1913,12 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "uid": {
-                    "type": "string",
-                    "description": "When provided, fit views to this node's geometry instead of all visible data.",
-                    "example": "node_1"
+                  "uids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "minItems": 1,
+                    "description": "When provided, fit views to the bounding geometry of the specified nodes. Use one UID for single-node reinit, multiple UIDs for multi-node reinit. Every listed node must exist and have a usable geometry.",
+                    "example": ["node_1", "node_2"]
                   }
                 }
               },
@@ -1888,9 +1928,15 @@
                   "value": {}
                 },
                 "node-scoped": {
-                  "summary": "Node-scoped reinit",
+                  "summary": "Single-node reinit",
                   "value": {
-                    "uid": "node_1"
+                    "uids": ["node_1"]
+                  }
+                },
+                "multi-node-scoped": {
+                  "summary": "Multi-node reinit",
+                  "value": {
+                    "uids": ["node_1", "node_2"]
                   }
                 }
               }
@@ -1908,20 +1954,51 @@
             "$ref": "#/components/responses/NodeNotFound"
           },
           "422": {
-            "description": "Node has no data or the data has no usable geometry",
+            "description": "A listed node has no data or the data has no usable geometry",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 },
-                "example": {
-                  "error": {
-                    "type": "https://docs.mitk.org/api/errors/NO_DATA",
-                    "code": "NO_DATA",
-                    "title": "No Data",
-                    "message": "Node 'node_1' has no data attached",
-                    "status": 422,
-                    "instance": "/api/v1/rendering/reinit"
+                "examples": {
+                  "no-data": {
+                    "summary": "Node has no data attached",
+                    "value": {
+                      "error": {
+                        "type": "https://docs.mitk.org/api/errors/NO_DATA",
+                        "code": "NO_DATA",
+                        "title": "No Data",
+                        "message": "Node 'node_1' has no data attached.",
+                        "status": 422,
+                        "instance": "/api/v1/rendering/reinit"
+                      }
+                    }
+                  },
+                  "no-geometry": {
+                    "summary": "Node data has no usable geometry",
+                    "value": {
+                      "error": {
+                        "type": "https://docs.mitk.org/api/errors/NO_GEOMETRY",
+                        "code": "NO_GEOMETRY",
+                        "title": "No Geometry",
+                        "message": "Node 'node_1' has no usable time geometry.",
+                        "status": 422,
+                        "instance": "/api/v1/rendering/reinit"
+                      }
+                    }
+                  },
+                  "rendering-error": {
+                    "summary": "Unexpected rendering framework error",
+                    "value": {
+                      "error": {
+                        "type": "https://docs.mitk.org/api/errors/RENDERING_ERROR",
+                        "code": "RENDERING_ERROR",
+                        "title": "Rendering Error",
+                        "message": "Rendering operation failed: ...",
+                        "status": 422,
+                        "instance": "/api/v1/rendering/reinit"
+                      }
+                    }
                   }
                 }
               }
@@ -1989,7 +2066,6 @@
         "type": "object",
         "required": [
           "name",
-          "version",
           "api_version",
           "mitk_version",
           "documentation_url",
@@ -1999,10 +2075,6 @@
           "name": {
             "type": "string",
             "example": "MITK Workbench REST API"
-          },
-          "version": {
-            "type": "string",
-            "example": "1.0.0"
           },
           "api_version": {
             "type": "string",

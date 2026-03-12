@@ -20,17 +20,22 @@
 
 Example:
     >>> import mitk_workbench_remote as mw
-    >>> wb = mw.connect(port=8080)
-    >>> wb.show("scan.nrrd")
+    >>> wb = mw.connect("http://localhost:8080")
+    >>> wb.ping()
+    True
 """
 
 from mitk_workbench_remote._version import __version__
+from mitk_workbench_remote.discovery import discover, launch
+from mitk_workbench_remote.storage import DataStorage
+from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
 
-# Public API will be re-exported here as modules are implemented.
-# Planned exports:
-#   connect, discover, launch,
-#   Workbench, WorkbenchInfo,
-#   DataStorage, DataNode,
-#   Image, MultiLabelSegmentation, LabelGroup, Label
-
-__all__ = ["__version__"]
+__all__ = [
+    "DataStorage",
+    "Workbench",
+    "WorkbenchInfo",
+    "__version__",
+    "connect",
+    "discover",
+    "launch",
+]
