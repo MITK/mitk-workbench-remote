@@ -22,6 +22,7 @@ Classes:
     DataNode: Represents one node with property shortcuts (name, visible, opacity, color),
         data access (get_data, set_data), child management, and batch property updates.
 """
+
 from __future__ import annotations
 
 import html as _html
@@ -29,7 +30,7 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Any, cast
 
-from mitk_workbench_remote.transport import RestTransport, TransferMode
+from mitk_workbench_remote.transport import RestTransport
 
 
 class PropertyScope(str, Enum):
@@ -432,10 +433,7 @@ class DataNode:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        return (
-            f"<DataNode {self._name!r} ({self._data_type})"
-            f" @ {self._path} uid={self._uid}>"
-        )
+        return f"<DataNode {self._name!r} ({self._data_type}) @ {self._path} uid={self._uid}>"
 
     def _repr_html_(self) -> str:
         e = _html.escape

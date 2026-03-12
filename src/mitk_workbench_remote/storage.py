@@ -88,9 +88,7 @@ class DataStorage:
         while True:
             resp = self._transport.get("/datastorage/nodes", params=params)
             body = resp.json()
-            nodes.extend(
-                DataNode._from_node_dict(d, self._transport) for d in body["data"]
-            )
+            nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
             params["offset"] = int(params["offset"]) + len(body["data"])
             if params["offset"] >= total_count:
@@ -147,9 +145,7 @@ class DataStorage:
         while True:
             resp = self._transport.get("/datastorage/nodes", params=params)
             body = resp.json()
-            nodes.extend(
-                DataNode._from_node_dict(d, self._transport) for d in body["data"]
-            )
+            nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
             params["offset"] = int(params["offset"]) + len(body["data"])
             if params["offset"] >= total_count:
@@ -197,9 +193,7 @@ class DataStorage:
             resp = self._transport.post("/datastorage/nodes", json=body)
         else:
             parent_uid = parent.uid if isinstance(parent, DataNode) else str(parent)
-            resp = self._transport.post(
-                f"/datastorage/nodes/{parent_uid}/children", json=body
-            )
+            resp = self._transport.post(f"/datastorage/nodes/{parent_uid}/children", json=body)
         return DataNode._from_node_dict(resp.json()["data"], self._transport)
 
     # ------------------------------------------------------------------
