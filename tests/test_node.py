@@ -338,7 +338,7 @@ def test_update_properties_passes_scope_param() -> None:
         json={},
         status=200,
     )
-    node.update_properties("data", visible=True)
+    node.update_properties(scope="data", visible=True)
     url = responses.calls[0].request.url
     assert "property_scope=data" in url
 

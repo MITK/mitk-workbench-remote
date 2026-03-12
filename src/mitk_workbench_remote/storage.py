@@ -26,7 +26,8 @@ from collections.abc import Iterator
 from typing import Any
 
 from mitk_workbench_remote import errors
-from mitk_workbench_remote.node import DataNode, PropertyScope, _serialize_property
+from mitk_workbench_remote.node import DataNode, PropertyScope
+from mitk_workbench_remote.properties import _serialize_property
 from mitk_workbench_remote.transport import RestTransport
 
 
@@ -201,7 +202,7 @@ class DataStorage:
     # ------------------------------------------------------------------
 
     def __len__(self) -> int:
-        resp = self._transport.get("/datastorage/nodes")
+        resp = self._transport.get("/datastorage/nodes", params={"limit": 1})
         return int(resp.json()["meta"]["total_count"])
 
     def __iter__(self) -> Iterator[DataNode]:
@@ -236,10 +237,10 @@ class DataStorage:
         header = "<tr><th>uid</th><th>name</th><th>type</th><th>path</th></tr>"
         rows = "".join(
             f"<tr>"
-            f"<td>{e(n._uid)}</td>"
-            f"<td>{e(n._name)}</td>"
-            f"<td>{e(n._data_type or '')}</td>"
-            f"<td>{e(n._path)}</td>"
+            f"<td>{e(n.uid)}</td>"
+            f"<td>{e(n._name)}</td>"  # display cache - avoids REST call
+            f"<td>{e(n.data_type or '')}</td>"
+            f"<td>{e(n.path)}</td>"
             f"</tr>"
             for n in nodes
         )

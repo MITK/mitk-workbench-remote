@@ -26,10 +26,10 @@ Classes:
 from __future__ import annotations
 
 import html as _html
-from collections.abc import Callable
 from enum import Enum
 from typing import Any, cast
 
+from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
 from mitk_workbench_remote.transport import RestTransport
 
 
@@ -45,62 +45,6 @@ class PropertyScope(str, Enum):
     ALL = "all"
     NODE = "node"
     DATA = "data"
-
-
-# ---------------------------------------------------------------------------
-# Property serialization helpers
-# ---------------------------------------------------------------------------
-
-# Dispatch table: known complex types with ergonomic Python representations.
-# Only types where we know the safe inverse serialization go here.
-_COMPLEX_DESERIALIZERS: dict[str, Callable[[Any], Any]] = {
-    "ColorProperty": lambda v: tuple(v),  # [r, g, b] -> (r, g, b)
-}
-
-
-def _deserialize_property(raw: Any) -> Any:
-    """Deserialize a property value from the wire format.
-
-    Simple types (str, int, float, bool) pass through unchanged.
-    Known complex types (e.g. ColorProperty) are converted to ergonomic
-    Python objects. Unknown complex types pass through as raw dicts so
-    they can be round-tripped via set_property.
-
-    Args:
-        raw: Raw value from the JSON response body.
-
-    Returns:
-        Deserialized Python value.
-    """
-    if isinstance(raw, dict) and "type" in raw and "value" in raw:
-        fn = _COMPLEX_DESERIALIZERS.get(raw["type"])
-        if fn is not None:
-            return fn(raw["value"])
-    return raw  # simple type OR unknown complex type -> passthrough
-
-
-_COMPLEX_SERIALIZERS: dict[str, Callable[[Any], dict[str, Any]]] = {
-    "color": lambda v: {"type": "ColorProperty", "value": list(v)},
-}
-
-
-def _serialize_property(key: str, value: Any) -> Any:
-    """Serialize a property value to the wire format.
-
-    Args:
-        key: Property key (used to select the correct wire type for known
-            complex properties such as ``"color"``).
-        value: Python value to serialize.
-
-    Returns:
-        JSON-serializable value in the server wire format.
-    """
-    if isinstance(value, dict) and "type" in value:
-        return value  # already in wire format — escape hatch for unknown complex types
-    fn = _COMPLEX_SERIALIZERS.get(key)
-    if fn is not None:
-        return fn(value)
-    return value  # simple type -> passthrough
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +177,8 @@ class DataNode:
 
     def update_properties(
         self,
-        scope: PropertyScope = PropertyScope.NODE,
         *,
+        scope: PropertyScope = PropertyScope.NODE,
         context: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -251,6 +195,11 @@ class DataNode:
                 scope :attr:`~PropertyScope.NODE`; ignored at data scope.
             **kwargs: Property key-value pairs to update.
         """
+        if scope == PropertyScope.ALL:
+            raise ValueError(
+                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
+                " PropertyScope.DATA."
+            )
         body = {k: _serialize_property(k, v) for k, v in kwargs.items()}
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
@@ -340,6 +289,11 @@ class DataNode:
             context: Optional renderer context identifier. Only relevant for
                 scope :attr:`~PropertyScope.NODE`; ignored at data scope.
         """
+        if scope == PropertyScope.ALL:
+            raise ValueError(
+                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
+                " PropertyScope.DATA."
+            )
         body = _serialize_property(key, value)
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
@@ -358,6 +312,11 @@ class DataNode:
             scope: Property scope (:attr:`~PropertyScope.NODE` or
                 :attr:`~PropertyScope.DATA`).
         """
+        if scope == PropertyScope.ALL:
+            raise ValueError(
+                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
+                " PropertyScope.DATA."
+            )
         self._transport.delete(
             f"/datastorage/nodes/{self._uid}/properties/{key}",
             params={"property_scope": scope},
@@ -370,8 +329,17 @@ class DataNode:
     @property
     def children(self) -> list[DataNode]:
         """Child nodes of this node. Always fetches from the server."""
-        resp = self._transport.get(f"/datastorage/nodes/{self._uid}/children")
-        return [DataNode._from_node_dict(d, self._transport) for d in resp.json()["data"]]
+        params: dict[str, str | int] = {"limit": 1000, "offset": 0}
+        nodes: list[DataNode] = []
+        while True:
+            resp = self._transport.get(f"/datastorage/nodes/{self._uid}/children", params=params)
+            body = resp.json()
+            nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
+            total_count: int = int(body["meta"]["total_count"])
+            params["offset"] = int(params["offset"]) + len(body["data"])
+            if params["offset"] >= total_count:
+                break
+        return nodes
 
     # ------------------------------------------------------------------
     # Removal
