@@ -542,7 +542,7 @@ def test_children_returns_list_of_data_nodes() -> None:
     responses.add(
         responses.GET,
         _api("/datastorage/nodes/node_1/children"),
-        json={"data": [child_dict]},
+        json={"data": [child_dict], "meta": {"total_count": 1}},
         status=200,
     )
     children = node.children
@@ -557,7 +557,7 @@ def test_children_returns_empty_list() -> None:
     responses.add(
         responses.GET,
         _api("/datastorage/nodes/node_1/children"),
-        json={"data": []},
+        json={"data": [], "meta": {"total_count": 0}},
         status=200,
     )
     assert node.children == []
