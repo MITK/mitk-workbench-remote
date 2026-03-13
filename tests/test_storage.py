@@ -239,7 +239,10 @@ def test_filter_property_string_passes_through_with_wildcard() -> None:
         status=200,
     )
     storage.filter(properties={"name": "CT*"})
-    assert "filter.name=CT%2A" in responses.calls[0].request.url or "filter.name=CT*" in responses.calls[0].request.url
+    assert (
+        "filter.name=CT%2A" in responses.calls[0].request.url
+        or "filter.name=CT*" in responses.calls[0].request.url
+    )
 
 
 @responses.activate

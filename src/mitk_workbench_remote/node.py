@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from mitk_workbench_remote import _io
-from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
 from mitk_workbench_remote.errors import UnsupportedDataTypeError
+from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
 from mitk_workbench_remote.transport import RestTransport, TransferMode
 
 
@@ -385,10 +385,12 @@ class DataNode:
     # ------------------------------------------------------------------
 
     # Data types that can be reconstructed as in-memory Python objects.
-    _SUPPORTED_DATA_TYPES: frozenset[str] = frozenset({
-        "Image",
-        "MultiLabelSegmentation",
-    })
+    _SUPPORTED_DATA_TYPES: frozenset[str] = frozenset(
+        {
+            "Image",
+            "MultiLabelSegmentation",
+        }
+    )
 
     def _check_data_type_supported(self) -> str:
         """Validate that the node's data type can be represented in Python.
@@ -435,9 +437,7 @@ class DataNode:
         dt = self._check_data_type_supported()
 
         if dt == "MultiLabelSegmentation":
-            raise NotImplementedError(
-                "MultiLabelSegmentation download is not yet implemented."
-            )
+            raise NotImplementedError("MultiLabelSegmentation download is not yet implemented.")
 
         nrrd_source = self._download_raw_source()
 
@@ -535,8 +535,10 @@ class DataNode:
             finally:
                 tmp_path.unlink(missing_ok=True)
         else:
-            raise RuntimeError("Cannot set data. Transfer mode requested by MITK via"
-                               f" transport layer is unknown. Unknown mode: {mode}")
+            raise RuntimeError(
+                "Cannot set data. Transfer mode requested by MITK via"
+                f" transport layer is unknown. Unknown mode: {mode}"
+            )
 
         if include_properties:
             metadata: dict[str, Any] = {}
@@ -565,7 +567,7 @@ class DataNode:
             return _io.write_nrrd(data)
         else:
             image_converter = find_image_converter(data)
-            #it is a image data type directly passed. So handle it via converter
+            # it is a image data type directly passed. So handle it via converter
             if image_converter is not None:
                 return image_converter.to_nrrd_bytes(data)
 
@@ -573,10 +575,9 @@ class DataNode:
         # so we give a clear error message instead of "no converter found".
         try:
             from mitk_workbench_remote.multilabel import MultiLabelSegmentation
+
             if isinstance(data, MultiLabelSegmentation):
-                raise NotImplementedError(
-                    "MultiLabelSegmentation upload is not yet implemented."
-                )
+                raise NotImplementedError("MultiLabelSegmentation upload is not yet implemented.")
         except ImportError:
             pass
 
@@ -615,10 +616,7 @@ class DataNode:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        return (
-            f"<DataNode {self._name!r} ({self._data_type})"
-            f" @ {self._path} uid={self._uid}>"
-        )
+        return f"<DataNode {self._name!r} ({self._data_type}) @ {self._path} uid={self._uid}>"
 
     def _repr_html_(self) -> str:
         e = _html.escape

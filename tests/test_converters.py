@@ -20,7 +20,7 @@
 
 import numpy as np
 
-from mitk_workbench_remote.converters import find_image_converter, find_converter_for_type
+from mitk_workbench_remote.converters import find_converter_for_type, find_image_converter
 from mitk_workbench_remote.converters._numpy import NumpyConverter
 from mitk_workbench_remote.image import Image
 

@@ -109,7 +109,9 @@ def test_image_from_converter_lazy_array() -> None:
     mock_converter.extract_metadata.return_value = {}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
-    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+    with patch(
+        "mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter
+    ):
         img = Image("fake_data")
         mock_converter.to_ndarray.assert_not_called()
         _ = img.array
@@ -126,7 +128,9 @@ def test_image_from_converter_extracts_geometry() -> None:
     mock_converter.extract_metadata.return_value = {"my_key": "my_value"}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
-    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+    with patch(
+        "mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter
+    ):
         img = Image("fake_data")
         assert img.spacing == (0.5, 1.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)
@@ -143,7 +147,9 @@ def test_image_explicit_kwargs_override_converter_geometry() -> None:
     mock_converter.extract_metadata.return_value = {"extracted": True}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
-    with patch("mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter):
+    with patch(
+        "mitk_workbench_remote.converters.find_image_converter", return_value=mock_converter
+    ):
         img = Image("fake_data", spacing=(2.0, 2.0, 2.0), properties={"custom": True})
         assert img.spacing == (2.0, 2.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)  # not overridden

@@ -29,6 +29,7 @@ from mitk_workbench_remote._spatial import (
     _normalize_spacing,
 )
 
+
 class Image:
     """Spatial image wrapper backed by a numpy array with spacing, origin, and direction.
 

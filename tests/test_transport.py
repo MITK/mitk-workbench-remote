@@ -366,20 +366,6 @@ def test_422_rendering_error_raises_RenderingError() -> None:
 
 
 @responses.activate
-def test_422_rendering_error_raises_RenderingError() -> None:
-    responses.add(
-        responses.POST,
-        _api("/rendering/update"),
-        json={"error": {"code": "RENDERING_ERROR", "message": "render pipeline failure"}},
-        status=422,
-    )
-    t = RestTransport(BASE)
-    with pytest.raises(errors.RenderingError):
-        t.post("/rendering/update")
-    t.close()
-
-
-@responses.activate
 def test_connection_error_raises_ConnectionError() -> None:
     import requests as req
 
