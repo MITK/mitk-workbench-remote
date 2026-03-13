@@ -549,7 +549,7 @@ class DataNode:
                 if converter is not None:
                     metadata = converter.extract_metadata(data)
             if metadata:
-                self.update_properties(PropertyScope.DATA, **metadata)
+                self.update_properties(scope=PropertyScope.DATA, **metadata)
 
     def _resolve_serialized_bytes(self, data: Any) -> bytes:
         """Convert data to serialized bytes for upload.
