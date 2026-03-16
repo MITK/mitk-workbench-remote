@@ -105,6 +105,12 @@ class Image:
         return f"Image(shape={self.shape}, dtype={self.dtype}, spacing={self._spacing})"
 
     def __eq__(self, other: object) -> bool:
+        """Return True if both images have identical pixel data and geometry.
+
+        Comparison is exact (bit-for-bit) for all spatial properties. Images
+        that round-trip through NRRD serialization may not compare equal due
+        to floating-point representation differences.
+        """
         if not isinstance(other, Image):
             return NotImplemented
         return (
@@ -146,7 +152,13 @@ class Image:
 
     @property
     def ndim(self) -> int:
-        """Number of spatial dimensions."""
+        """Number of spatial dimensions.
+
+        For vector or multichannel images, ``ndim`` is the number of *spatial*
+        axes (e.g. 3 for a 3-D volume), while :attr:`shape` may have an
+        additional channel axis. ``ndim`` equals ``len(spacing)`` and always
+        matches the geometry, not the array rank.
+        """
         return len(self._spacing)
 
     @property
@@ -161,7 +173,7 @@ class Image:
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Data-scope properties/properties."""
+        """Data-scope metadata."""
         return self._properties
 
     # ------------------------------------------------------------------

@@ -19,7 +19,7 @@
 """MultiLabel NRRD parsing and serialization.
 
 Handles the 4D NRRD format used by MITK MultiLabelSegmentation. Label group properties
-is stored in the NRRD header key 'org.mitk.multilabel.segmentation.labelgroups' as JSON.
+are stored in the NRRD header key 'org.mitk.multilabel.segmentation.labelgroups' as JSON.
 
 High-level functions using LabelGroup/Label types are deferred to T9.
 This module provides raw dict-based functions.
