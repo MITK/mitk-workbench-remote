@@ -40,9 +40,6 @@ _KINDS = "kinds"
 # MITK convention: left-posterior-superior
 _MITK_SPACE = "left-posterior-superior"
 
-# Custom properties prefix used by NRRD `:=` fields
-_CUSTOM_PREFIX = ""  # pynrrd returns custom fields as-is
-
 
 def read_nrrd(source: bytes | str | Path) -> Any:
     """Read an NRRD file/bytes and return an Image.
@@ -242,6 +239,16 @@ def _write_custom_metadata(header: dict[str, Any], metadata: dict[str, Any]) -> 
     Args:
         header: NRRD header dict to modify in-place.
         metadata: Custom key-value pairs to add.
+
+    Raises:
+        ValueError: If any metadata key conflicts with a standard NRRD header field
+            already present in *header*.
     """
+    conflicts = [k for k in metadata if k in header]
+    if conflicts:
+        raise ValueError(
+            f"Metadata keys conflict with standard NRRD header fields: {conflicts!r}."
+            " Remove these keys from the image metadata before writing."
+        )
     for key, value in metadata.items():
         header[key] = value

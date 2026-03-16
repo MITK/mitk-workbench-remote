@@ -31,6 +31,7 @@ Built-in converters (registered at import time):
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -71,11 +72,18 @@ class ImageConverter(Protocol):
 
 
 _converters: list[ImageConverter] = []
+_converters_lock = threading.Lock()
 
 
 def register_converter(converter: ImageConverter) -> None:
-    """Register a new ImageConverter."""
-    _converters.append(converter)
+    """Register a new ImageConverter.
+
+    Thread-safe. Converters should be registered before any concurrent image
+    operations; registrations that race with lookups may not be visible
+    immediately.
+    """
+    with _converters_lock:
+        _converters.append(converter)
 
 
 def find_image_converter(obj: Any) -> ImageConverter | None:
