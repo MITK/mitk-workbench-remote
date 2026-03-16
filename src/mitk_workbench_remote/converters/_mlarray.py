@@ -20,7 +20,8 @@
 
 Registered automatically at import time if mlarray is installed.
 mlarray is numpy-backed, so conversion is trivial; spatial properties
-(spacing, origin, direction) is preserved via mlarray's attributes.
+(spacing, origin, direction) are preserved via mlarray's attributes.
+Custom metadata is stored in and read from mlarray's ``meta.extra`` field.
 """
 
 from __future__ import annotations
@@ -52,8 +53,8 @@ class MLArrayConverter:
         return result
 
     def extract_metadata(self, obj: Any) -> dict[str, Any]:
-        if hasattr(obj, "properties"):
-            return dict(obj.metadata)
+        if hasattr(obj, "meta") and hasattr(obj.meta, "extra") and obj.meta.extra:
+            return dict(obj.meta.extra)
         return {}
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
@@ -75,6 +76,6 @@ class MLArrayConverter:
             result.origin = image.origin
         if hasattr(result, "direction"):
             result.direction = image.direction.tolist()
-        if hasattr(result, "properties"):
-            result.metadata = dict(image.metadata)
+        if image.metadata and hasattr(result, "meta") and hasattr(result.meta, "extra"):
+            result.meta.extra = dict(image.metadata)
         return result
