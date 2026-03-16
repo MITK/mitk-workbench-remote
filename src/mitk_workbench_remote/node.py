@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from mitk_workbench_remote import _io
-from mitk_workbench_remote.errors import UnsupportedDataTypeError
+from mitk_workbench_remote.errors import TransferError, UnsupportedDataTypeError
 from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
 from mitk_workbench_remote.transport import RestTransport, TransferMode
 
@@ -52,7 +52,7 @@ class PropertyScope(str, Enum):
 class DataNode:
     """A single node in the MITK DataStorage.
 
-    Wrapper that rpresents one node with property shortcuts (name, visible,
+    Wrapper that represents one node with property shortcuts (name, visible,
     opacity, color), data access (get_data, set_data), child management,
     and batch property updates.
 
@@ -172,6 +172,14 @@ class DataNode:
     def color(self, value: tuple[float, float, float]) -> None:
         self.set_property("color", value)
 
+    def _validate_writable_scope(self, scope: PropertyScope) -> None:
+        """Raise ValueError if scope is ALL (not valid for write operations)."""
+        if scope == PropertyScope.ALL:
+            raise ValueError(
+                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
+                " PropertyScope.DATA."
+            )
+
     # ------------------------------------------------------------------
     # Batch property update
     # ------------------------------------------------------------------
@@ -196,11 +204,7 @@ class DataNode:
                 scope :attr:`~PropertyScope.NODE`; ignored at data scope.
             **kwargs: Property key-value pairs to update.
         """
-        if scope == PropertyScope.ALL:
-            raise ValueError(
-                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
-                " PropertyScope.DATA."
-            )
+        self._validate_writable_scope(scope)
         body = {k: _serialize_property(k, v) for k, v in kwargs.items()}
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
@@ -290,11 +294,7 @@ class DataNode:
             context: Optional renderer context identifier. Only relevant for
                 scope :attr:`~PropertyScope.NODE`; ignored at data scope.
         """
-        if scope == PropertyScope.ALL:
-            raise ValueError(
-                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
-                " PropertyScope.DATA."
-            )
+        self._validate_writable_scope(scope)
         body = _serialize_property(key, value)
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
@@ -313,11 +313,7 @@ class DataNode:
             scope: Property scope (:attr:`~PropertyScope.NODE` or
                 :attr:`~PropertyScope.DATA`).
         """
-        if scope == PropertyScope.ALL:
-            raise ValueError(
-                "PropertyScope.ALL is not valid for write operations; use PropertyScope.NODE or"
-                " PropertyScope.DATA."
-            )
+        self._validate_writable_scope(scope)
         self._transport.delete(
             f"/datastorage/nodes/{self._uid}/properties/{key}",
             params={"property_scope": scope},
@@ -465,7 +461,13 @@ class DataNode:
         content_type = resp.headers.get("Content-Type", "")
         if "application/json" in content_type:
             body = resp.json()
-            return cast(str, body["transfer"]["file_path"])
+            transfer = body.get("transfer")
+            if not isinstance(transfer, dict) or "file_path" not in transfer:
+                raise TransferError(
+                    "Malformed file-reference response from server: expected"
+                    f" 'transfer.file_path' in JSON body, got: {body!r}"
+                )
+            return cast(str, transfer["file_path"])
         return resp.content
 
     def save_data(self, path: str | Path) -> Path:
@@ -484,7 +486,10 @@ class DataNode:
         raw_source = self._download_raw_source()
         dest = Path(path)
         if isinstance(raw_source, str):
-            # file-reference mode: server provided a local path, copy it
+            # file-reference mode: server provided a local path, copy it.
+            # Security note: the path is fully trusted — only use file-reference
+            # mode with a trusted server, as a compromised server could supply
+            # arbitrary local paths.
             dest.write_bytes(Path(raw_source).read_bytes())
         else:
             dest.write_bytes(raw_source)
@@ -508,9 +513,6 @@ class DataNode:
                 the data being uploaded.
             TypeError: If no converter is registered for ``data``'s type.
         """
-        from mitk_workbench_remote.converters import find_image_converter
-        from mitk_workbench_remote.image import Image
-
         nrrd_bytes = self._resolve_serialized_bytes(data)
 
         endpoint = f"/datastorage/nodes/{self._uid}/data"
@@ -528,7 +530,10 @@ class DataNode:
 
         elif mode == TransferMode.FILE_REFERENCE:
             tmp_dir = self._resolve_temp_dir()
-            tmp_path = Path(tmp_dir) / "upload.nrrd"
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".nrrd", dir=tmp_dir
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
             try:
                 tmp_path.write_bytes(nrrd_bytes)
                 self._transport.put_file_reference(endpoint, file_path=str(tmp_path))
@@ -541,6 +546,9 @@ class DataNode:
             )
 
         if include_properties:
+            from mitk_workbench_remote.converters import find_image_converter
+            from mitk_workbench_remote.image import Image
+
             metadata: dict[str, Any] = {}
             if isinstance(data, Image):
                 metadata = data.metadata
@@ -555,24 +563,15 @@ class DataNode:
         """Convert data to serialized bytes for upload.
 
         Raises:
-            UnsupportedDataTypeError: If the data is a MultiLabelSegmentation
+            NotImplementedError: If the data is a MultiLabelSegmentation
                 (not yet implemented).
             TypeError: If no converter is registered for the data's type.
         """
         from mitk_workbench_remote import _io
-        from mitk_workbench_remote.converters import find_image_converter
         from mitk_workbench_remote.image import Image
 
-        if isinstance(data, Image):
-            return _io.write_nrrd(data)
-        else:
-            image_converter = find_image_converter(data)
-            # it is a image data type directly passed. So handle it via converter
-            if image_converter is not None:
-                return image_converter.to_nrrd_bytes(data)
-
-        # MultiLabelSegmentation placeholder -- check before converter lookup
-        # so we give a clear error message instead of "no converter found".
+        # Check MultiLabelSegmentation before converter lookup so we give a
+        # clear error message instead of a generic "no converter found".
         try:
             from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
@@ -581,6 +580,15 @@ class DataNode:
         except ImportError:
             pass
 
+        if isinstance(data, Image):
+            return _io.write_nrrd(data)
+
+        from mitk_workbench_remote.converters import find_image_converter
+
+        image_converter = find_image_converter(data)
+        if image_converter is not None:
+            return image_converter.to_nrrd_bytes(data)
+
         raise TypeError(f"No converter found for {type(data).__name__}")
 
     def _resolve_temp_dir(self) -> str:
@@ -588,10 +596,19 @@ class DataNode:
 
         If file-access restrictions are active, uses the first allowed path.
         Otherwise uses the system temp directory.
+
+        Raises:
+            TransferError: If the server-advertised allowed path does not exist
+                on the local filesystem.
         """
         config = self._transport.file_access_config
         if config.restrictions_active and config.allowed_paths:
-            return config.allowed_paths[0]
+            p = Path(config.allowed_paths[0])
+            if not p.exists():
+                raise TransferError(
+                    f"File-access allowed path does not exist on this filesystem: {p}"
+                )
+            return str(p)
         return tempfile.gettempdir()
 
     # ------------------------------------------------------------------
