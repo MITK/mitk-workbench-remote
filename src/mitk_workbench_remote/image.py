@@ -123,7 +123,7 @@ class Image:
 
         if self._properties:
             rows.append(
-                "<tr><th colspan=\"2\">Fetched properties"
+                '<tr><th colspan="2">Fetched properties'
                 " <small><em>(snapshot at download time &mdash; additional or changed"
                 " properties on the Workbench side are not reflected here)</em></small>"
                 "</th></tr>"
