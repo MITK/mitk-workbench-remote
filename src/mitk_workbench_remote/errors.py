@@ -68,6 +68,26 @@ class DataStorageNotAvailableError(MitkError):
     """Raised when the server returns DATASTORAGE_NOT_AVAILABLE (HTTP 503)."""
 
 
+class UnsupportedDataTypeError(MitkError):
+    """Raised when a node's data type cannot be represented in Python.
+
+    The MITK Workbench may hold data types (e.g. Surface, PointSet) for which
+    this library has no in-memory representation yet. Use
+    :meth:`~mitk_workbench_remote.node.DataNode.save_data` to download the raw
+    bytes to a file instead.
+
+    Args:
+        data_type: The MITK data type string that is not supported.
+    """
+
+    def __init__(self, data_type: str) -> None:
+        self.data_type = data_type
+        super().__init__(
+            f"Data type {data_type!r} is not supported for in-memory representation. "
+            f"Use save_data() to download the raw bytes to a file."
+        )
+
+
 class TransferError(MitkError):
     """Raised on UNSUPPORTED_FORMAT (HTTP 415) or I/O failure during transfer."""
 

@@ -21,7 +21,7 @@
 # Demonstrates:
 #   - Downloading a segmentation via node.get_data()
 #   - Inspecting groups and labels
-#   - Editing label metadata (name, color, visibility)
+#   - Editing label properties (name, color, visibility)
 #   - Accessing a group as an Image via get_group_image()
 #   - Importing model output with value_map remapping
 #   - Pushing changes back via node.set_data()

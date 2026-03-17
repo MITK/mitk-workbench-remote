@@ -27,7 +27,8 @@ Example:
 
 from mitk_workbench_remote._version import __version__
 from mitk_workbench_remote.discovery import discover, launch
-from mitk_workbench_remote.errors import RenderingError
+from mitk_workbench_remote.errors import RenderingError, UnsupportedDataTypeError
+from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.node import DataNode, PropertyScope
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
@@ -35,8 +36,10 @@ from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
 __all__ = [
     "DataNode",
     "DataStorage",
+    "Image",
     "PropertyScope",
     "RenderingError",
+    "UnsupportedDataTypeError",
     "Workbench",
     "WorkbenchInfo",
     "__version__",

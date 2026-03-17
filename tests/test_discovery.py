@@ -486,7 +486,7 @@ def test_launch_timeout_terminates_process_and_raises_ConnectionError(tmp_path: 
     exe = _make_fake_exe(tmp_path)
     port = 8090
 
-    # Always refuse connection → every call raises ConnectionError
+    # Always refuse connection -> every call raises ConnectionError
     def _always_refuse(request):
         raise requests.exceptions.ConnectionError("refused")
 

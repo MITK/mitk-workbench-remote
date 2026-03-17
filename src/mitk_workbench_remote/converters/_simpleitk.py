@@ -16,8 +16,68 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""SimpleITK ↔ Image converter — optional dependency.
+"""SimpleITK converter -- optional dependency.
 
 Registered automatically at import time if SimpleITK is installed.
 Preserves spacing, origin, and direction through the conversion.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import SimpleITK as sitk
+
+
+class SitkConverter:
+    """Converter for SimpleITK Image objects."""
+
+    @property
+    def target_type(self) -> type:
+        return sitk.Image  # type: ignore[no-any-return]
+
+    def can_handle(self, obj: Any) -> bool:
+        return isinstance(obj, sitk.Image)
+
+    def extract_geometry(self, obj: Any) -> dict[str, Any]:
+        img: sitk.Image = obj
+        ndim = img.GetDimension()
+        spacing = img.GetSpacing()
+        origin = img.GetOrigin()
+        # SimpleITK direction is a flat tuple of ndim*ndim elements
+        direction_flat = img.GetDirection()
+        direction = np.array(direction_flat, dtype=np.float64).reshape(ndim, ndim)
+        return {
+            "spacing": tuple(spacing),
+            "origin": tuple(origin),
+            "direction": direction,
+        }
+
+    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+        img: sitk.Image = obj
+        metadata: dict[str, Any] = {}
+        for key in img.GetMetaDataKeys():
+            metadata[key] = img.GetMetaData(key)
+        return metadata
+
+    def to_ndarray(self, obj: Any) -> np.ndarray:
+        return sitk.GetArrayFromImage(obj)  # type: ignore[no-any-return]
+
+    def to_nrrd_bytes(self, obj: Any) -> bytes:
+        from mitk_workbench_remote._io.nrrd import write_nrrd
+        from mitk_workbench_remote.image import Image
+
+        image = Image(obj)
+        return write_nrrd(image)
+
+    def from_image(self, image: Any) -> sitk.Image:
+        arr = image.array
+        sitk_image = sitk.GetImageFromArray(arr)
+        sitk_image.SetSpacing(image.spacing)
+        sitk_image.SetOrigin(image.origin)
+        direction_flat = image.direction.flatten().tolist()
+        sitk_image.SetDirection(direction_flat)
+        for key, value in image.metadata.items():
+            sitk_image.SetMetaData(key, str(value))
+        return sitk_image
