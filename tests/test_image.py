@@ -222,3 +222,68 @@ def test_repr_includes_shape() -> None:
 def test_repr_includes_spacing() -> None:
     img = Image(np.zeros((3, 4, 5)), spacing=(0.5, 1.0, 2.0))
     assert "(0.5, 1.0, 2.0)" in repr(img)
+
+
+# ---------------------------------------------------------------------------
+# _repr_html_
+# ---------------------------------------------------------------------------
+
+
+def test_repr_html_returns_string() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert isinstance(img._repr_html_(), str)
+
+
+def test_repr_html_contains_shape() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    assert "(3, 4, 5)" in img._repr_html_()
+
+
+def test_repr_html_contains_dtype() -> None:
+    img = Image(np.zeros((3, 4, 5), dtype=np.float32))
+    assert "float32" in img._repr_html_()
+
+
+def test_repr_html_contains_spacing() -> None:
+    img = Image(np.zeros((3, 4, 5)), spacing=(0.5, 1.0, 2.0))
+    assert "(0.5, 1.0, 2.0)" in img._repr_html_()
+
+
+def test_repr_html_contains_origin() -> None:
+    img = Image(np.zeros((3, 4, 5)), origin=(10.0, 20.0, 30.0))
+    assert "(10.0, 20.0, 30.0)" in img._repr_html_()
+
+
+def test_repr_html_contains_direction() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    html = img._repr_html_()
+    # Identity direction: rows separated by |
+    assert "|" in html
+
+
+def test_repr_html_no_properties_section_when_empty() -> None:
+    img = Image(np.zeros((3, 4, 5)))
+    html = img._repr_html_()
+    assert "Fetched properties" not in html
+
+
+def test_repr_html_shows_properties_section_when_present() -> None:
+    img = Image(np.zeros((3, 4, 5)), properties={"my_key": "my_value"})
+    html = img._repr_html_()
+    assert "Fetched properties" in html
+    assert "my_key" in html
+    assert "my_value" in html
+
+
+def test_repr_html_properties_section_includes_snapshot_note() -> None:
+    img = Image(np.zeros((3, 4, 5)), properties={"k": "v"})
+    html = img._repr_html_()
+    assert "snapshot" in html.lower()
+
+
+def test_repr_html_escapes_special_characters_in_property_values() -> None:
+    img = Image(np.zeros((3, 4, 5)), properties={"<script>": "<b>xss</b>"})
+    html = img._repr_html_()
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "&lt;b&gt;xss&lt;/b&gt;" in html
