@@ -507,6 +507,10 @@ class DataNode:
         SimpleITK.Image, mlarray.MLArray). The transfer mode is chosen
         automatically.
 
+        After a successful upload, :attr:`data_type` is updated locally to
+        reflect the uploaded type without requiring an explicit
+        :meth:`refresh` call.
+
         Args:
             data: Pixel data or a convertible object.
             include_properties: If ``True``, also upload the data's properties
@@ -548,6 +552,29 @@ class DataNode:
                 "Cannot set data. Transfer mode requested by MITK via"
                 f" transport layer is unknown. Unknown mode: {mode}"
             )
+
+        # Update the cached data_type to reflect the uploaded data so that
+        # get_data() works immediately after set_data() without requiring
+        # an explicit refresh() call.
+        # For known Python types (Image, MultiLabelSegmentation) we can set the
+        # type locally. For all other types (numpy arrays, third-party converter
+        # types) the server determines the resulting type, so refresh from there.
+        from mitk_workbench_remote.image import Image as _Image
+
+        _is_multilabel = False
+        try:
+            from mitk_workbench_remote.multilabel import MultiLabelSegmentation as _MLS
+
+            _is_multilabel = isinstance(data, _MLS)
+        except ImportError:
+            pass
+
+        if _is_multilabel:
+            self._data_type = "MultiLabelSegmentation"
+        elif isinstance(data, _Image):
+            self._data_type = "Image"
+        else:
+            self.refresh()
 
         if include_properties:
             from mitk_workbench_remote.converters import find_image_converter

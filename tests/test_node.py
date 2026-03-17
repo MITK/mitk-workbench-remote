@@ -1031,9 +1031,16 @@ def test_set_data_direct_mode_ndarray() -> None:
         json={},
         status=200,
     )
+    # numpy arrays go through the converter registry, so set_data calls refresh()
+    # to determine the resulting data_type from the server.
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1"),
+        json={"data": _node()},
+        status=200,
+    )
     arr = np.zeros((3, 4, 5), dtype=np.float32)
     node.set_data(arr)
-    assert len(responses.calls) == 1
     # Body should be NRRD bytes (starts with NRRD magic)
     assert responses.calls[0].request.body[:4] == b"NRRD"
 
@@ -1109,3 +1116,65 @@ def test_set_data_include_properties() -> None:
     assert len(responses.calls) == 2
     patch_body = json.loads(responses.calls[1].request.body)
     assert patch_body.get("my_prop") == "my_value"
+
+
+# ---------------------------------------------------------------------------
+# set_data — data_type cache update
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_set_data_updates_data_type_to_image() -> None:
+    """set_data with an Image sets data_type locally — no refresh call."""
+    node = _make_direct_node(data_type=None)
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    img = Image(np.zeros((3, 4, 5), dtype=np.float32))
+    node.set_data(img)
+    assert node.data_type == "Image"
+    assert len(responses.calls) == 1  # only the PUT, no refresh
+
+
+@responses.activate
+def test_set_data_updates_data_type_to_multilabel_segmentation() -> None:
+    """set_data with a MultiLabelSegmentation sets data_type locally — no refresh call."""
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+    node = _make_direct_node(data_type=None)
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+    seg.add_label(Label(1, "Organ"), group=seg.add_group("Group1"))
+    node.set_data(seg)
+    assert node.data_type == "MultiLabelSegmentation"
+    assert len(responses.calls) == 1  # only the PUT, no refresh
+
+
+@responses.activate
+def test_set_data_refreshes_data_type_for_ndarray() -> None:
+    """set_data with a numpy array calls refresh() to get the data_type from the server."""
+    node = _make_direct_node(data_type=None)
+    responses.add(
+        responses.PUT,
+        _api("/datastorage/nodes/node_1/data"),
+        json={},
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1"),
+        json={"data": {**_node(), "data_type": "Image"}},
+        status=200,
+    )
+    arr = np.zeros((3, 4, 5), dtype=np.float32)
+    node.set_data(arr)
+    assert node.data_type == "Image"
+    assert len(responses.calls) == 2  # PUT data + GET refresh
