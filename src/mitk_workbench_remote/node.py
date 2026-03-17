@@ -431,17 +431,14 @@ class DataNode:
                 in Python. Use :meth:`save_data` to download raw bytes instead.
         """
         dt = self._check_data_type_supported()
-
-        if dt == "MultiLabelSegmentation":
-            raise NotImplementedError("MultiLabelSegmentation download is not yet implemented.")
-
         nrrd_source = self._download_raw_source()
 
+        if dt == "MultiLabelSegmentation":
+            return self._get_data_multilabel(nrrd_source, include_properties=include_properties)
         if dt == "Image":
             return self._get_data_image(nrrd_source, include_properties=include_properties)
-        else:
-            # Unreachable after _check_data_type_supported, but explicit.
-            raise UnsupportedDataTypeError(dt)
+        # Unreachable after _check_data_type_supported, but explicit.
+        raise UnsupportedDataTypeError(dt)
 
     def _get_data_image(self, nrrd_source: bytes | str, *, include_properties: bool) -> Any:
         """Deserialize NRRD data into an Image."""
@@ -450,6 +447,13 @@ class DataNode:
             props = self.get_properties(scope=PropertyScope.DATA)
             image._properties = props
         return image
+
+    def _get_data_multilabel(self, nrrd_source: bytes | str, *, include_properties: bool) -> Any:
+        """Deserialize NRRD data into a MultiLabelSegmentation."""
+        seg = _io.read_multilabel_nrrd(nrrd_source)
+        if include_properties:
+            seg._properties = self.get_properties(scope=PropertyScope.DATA)
+        return seg
 
     def _download_raw_source(self) -> bytes | str:
         """Download raw data and return bytes or a file path.
@@ -548,9 +552,10 @@ class DataNode:
         if include_properties:
             from mitk_workbench_remote.converters import find_image_converter
             from mitk_workbench_remote.image import Image
+            from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
             metadata: dict[str, Any] = {}
-            if isinstance(data, Image):
+            if isinstance(data, (MultiLabelSegmentation, Image)):
                 metadata = data.metadata
             else:
                 converter = find_image_converter(data)
@@ -563,32 +568,20 @@ class DataNode:
         """Convert data to serialized bytes for upload.
 
         Raises:
-            NotImplementedError: If the data is a MultiLabelSegmentation
-                (not yet implemented).
             TypeError: If no converter is registered for the data's type.
         """
         from mitk_workbench_remote import _io
+        from mitk_workbench_remote.converters import find_image_converter
         from mitk_workbench_remote.image import Image
+        from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
-        # Check MultiLabelSegmentation before converter lookup so we give a
-        # clear error message instead of a generic "no converter found".
-        try:
-            from mitk_workbench_remote.multilabel import MultiLabelSegmentation
-
-            if isinstance(data, MultiLabelSegmentation):
-                raise NotImplementedError("MultiLabelSegmentation upload is not yet implemented.")
-        except ImportError:
-            pass
-
+        if isinstance(data, MultiLabelSegmentation):
+            return _io.write_multilabel_nrrd(data)
         if isinstance(data, Image):
             return _io.write_nrrd(data)
-
-        from mitk_workbench_remote.converters import find_image_converter
-
         image_converter = find_image_converter(data)
         if image_converter is not None:
             return image_converter.to_nrrd_bytes(data)
-
         raise TypeError(f"No converter found for {type(data).__name__}")
 
     def _resolve_temp_dir(self) -> str:

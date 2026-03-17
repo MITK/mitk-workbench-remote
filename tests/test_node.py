@@ -916,10 +916,28 @@ def test_get_data_unsupported_type_does_not_make_http_call() -> None:
         node.get_data()
 
 
-def test_get_data_multilabel_segmentation_not_implemented() -> None:
+@responses.activate
+def test_get_data_multilabel_segmentation_direct_mode() -> None:
+    from mitk_workbench_remote._io import write_multilabel_nrrd
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+    seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+    g = seg.add_group("Organs")
+    seg.add_label(Label(1, "Liver"), group=g)
+    nrrd_bytes = write_multilabel_nrrd(seg)
+
     node = _make_direct_node(data_type="MultiLabelSegmentation")
-    with pytest.raises(NotImplementedError, match="MultiLabelSegmentation"):
-        node.get_data()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    result = node.get_data()
+    assert isinstance(result, MultiLabelSegmentation)
+    assert len(result.groups) == 1
+    assert result.get_label(1) is not None
 
 
 # ---------------------------------------------------------------------------
