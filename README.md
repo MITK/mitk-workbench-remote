@@ -5,7 +5,7 @@
 [![Python 3.10](https://img.shields.io/badge/python-3.x-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![SemVer](https://img.shields.io/badge/semver-2.0.0-blue.svg)](https://semver.org/)
-[![Documentation](https://readthedocs.org/projects/mitk-workbench-remote/badge/?version=latest)](https://avid.readthedocs.io/en/latest/)
+[![Documentation](https://readthedocs.org/projects/mitk-workbench-remote/badge/?version=latest)](https://mitk-workbench-remote.readthedocs.io/en/latest/)
 
 `mitk-workbench-remote` is a Python library for controlling running [MITK Workbench](https://www.mitk.org) instances programmatically via their REST API. It is designed for researchers and developers who want to drive the Workbench from Python scripts, Jupyter notebooks, and ML pipelines — loading images, editing segmentations, and managing data nodes without touching the GUI.
 

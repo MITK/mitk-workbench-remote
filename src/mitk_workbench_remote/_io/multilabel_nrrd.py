@@ -31,7 +31,10 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mitk_workbench_remote.multilabel import Label, LabelGroup, MultiLabelSegmentation
 
 import nrrd
 import numpy as np
@@ -186,7 +189,7 @@ def write_multilabel_nrrd_raw(
 # ---------------------------------------------------------------------------
 
 
-def _label_from_dict(d: dict[str, Any]) -> Any:
+def _label_from_dict(d: dict[str, Any]) -> Label:
     """Build a Label from a raw label dict.
 
     Skips value=0 check -- callers must filter out UNLABELED_VALUE before calling.
@@ -213,7 +216,7 @@ def _label_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
-def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[Any, list[Any]]:
+def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[LabelGroup, list[Label]]:
     """Build a LabelGroup and its Labels from a raw group dict.
 
     Labels with value=0 (UNLABELED_VALUE) are silently skipped.
@@ -227,7 +230,7 @@ def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[Any, list[Any]]:
     from mitk_workbench_remote.multilabel import LabelGroup
 
     group = LabelGroup(name=g.get("name"))
-    labels: list[Any] = []
+    labels: list[Label] = []
     for label_dict in g.get("labels", []):
         if label_dict.get("value", 0) == 0:
             continue  # skip UNLABELED_VALUE
@@ -237,7 +240,7 @@ def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[Any, list[Any]]:
     return group, labels
 
 
-def _label_to_dict(label: Any) -> dict[str, Any]:
+def _label_to_dict(label: Label) -> dict[str, Any]:
     """Serialize a Label to a raw dict for NRRD header storage.
 
     Args:
@@ -263,7 +266,7 @@ def _label_to_dict(label: Any) -> dict[str, Any]:
     return d
 
 
-def _labelgroup_to_dict(group: Any, labels_dict: dict[int, Any]) -> dict[str, Any]:
+def _labelgroup_to_dict(group: LabelGroup, labels_dict: dict[int, Label]) -> dict[str, Any]:
     """Serialize a LabelGroup to a raw dict for NRRD header storage.
 
     Args:
@@ -286,7 +289,7 @@ def _labelgroup_to_dict(group: Any, labels_dict: dict[int, Any]) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
-def read_multilabel_nrrd(source: bytes | str | Path) -> Any:
+def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
     """Read a multilabel NRRD and return a MultiLabelSegmentation.
 
     Args:
@@ -300,9 +303,9 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> Any:
 
     array, groups_data, spatial_info = read_multilabel_nrrd_raw(source)
 
-    groups: list[Any] = []
-    labels_dict: dict[int, Any] = {}
-    group_images: list[Any] = []
+    groups: list[LabelGroup] = []
+    labels_dict: dict[int, Label] = {}
+    group_images: list[Image] = []
 
     for i, group_dict in enumerate(groups_data):
         group, group_labels = _labelgroup_from_dict(group_dict)
@@ -328,7 +331,7 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> Any:
     )
 
 
-def write_multilabel_nrrd(seg: Any, *, path: str | Path | None = None) -> bytes:
+def write_multilabel_nrrd(seg: MultiLabelSegmentation, *, path: str | Path | None = None) -> bytes:
     """Serialize a MultiLabelSegmentation to NRRD bytes.
 
     Args:

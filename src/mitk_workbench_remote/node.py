@@ -560,16 +560,9 @@ class DataNode:
         # type locally. For all other types (numpy arrays, third-party converter
         # types) the server determines the resulting type, so refresh from there.
         from mitk_workbench_remote.image import Image as _Image
+        from mitk_workbench_remote.multilabel import MultiLabelSegmentation as _MLS
 
-        _is_multilabel = False
-        try:
-            from mitk_workbench_remote.multilabel import MultiLabelSegmentation as _MLS
-
-            _is_multilabel = isinstance(data, _MLS)
-        except ImportError:
-            pass
-
-        if _is_multilabel:
+        if isinstance(data, _MLS):
             self._data_type = "MultiLabelSegmentation"
         elif isinstance(data, _Image):
             self._data_type = "Image"

@@ -269,9 +269,9 @@ def test_add_label_explicit_value() -> None:
     g = seg.add_group("G")
     lbl = seg.add_label(Label(7, "Spleen"), group=g)
     assert lbl.value == 7
-    # next auto should skip 7
+    # next auto value is max+1 (gaps are not reused, matching MITK strategy)
     lbl2 = seg.add_label(Label(None, "Liver"), group=g)
-    assert lbl2.value == 1
+    assert lbl2.value == 8
 
 
 def test_add_label_duplicate_raises() -> None:

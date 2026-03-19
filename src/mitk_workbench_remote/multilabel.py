@@ -338,6 +338,7 @@ class MultiLabelSegmentation:
             if not np.allclose(img.direction, self._direction):
                 raise ValueError(f"Group image {i} direction mismatch")
         self._shape: tuple[int, ...] | None = canonical_shape
+        self._max_value: int = max(self._labels.keys(), default=0)
 
     # ------------------------------------------------------------------
     # Factory
@@ -413,8 +414,8 @@ class MultiLabelSegmentation:
 
     @property
     def labels(self) -> list[Label]:
-        """All Label objects across all groups (unordered)."""
-        return list(self._labels.values())
+        """All Label objects across all groups, sorted by value."""
+        return sorted(self._labels.values(), key=lambda label: label.value)
 
     @property
     def spacing(self) -> tuple[float, ...]:
@@ -532,6 +533,7 @@ class MultiLabelSegmentation:
 
         self._labels[v] = label
         self._groups[group]._label_ids.append(v)
+        self._max_value = max(self._max_value, v)
         return label
 
     def remove_label(self, value: int, *, clear_pixels: bool = True) -> None:
@@ -574,11 +576,12 @@ class MultiLabelSegmentation:
         return len(self._groups) - 1
 
     def _next_free_value(self) -> int:
-        """Return the smallest integer >= 1 not already used as a label value."""
-        v = 1
-        while v in self._labels:
-            v += 1
-        return v
+        """Return the next available label value as a high-water mark plus one.
+
+        This is O(1) and matches MITK C++'s own strategy. Gaps left by
+        :meth:`remove_label` are intentionally not reused.
+        """
+        return self._max_value + 1
 
     # ------------------------------------------------------------------
     # Group image access
@@ -679,6 +682,9 @@ class MultiLabelSegmentation:
             ValueError: If a target label name does not exist in the group, or a
                 target integer value does not belong to the group.
         """
+        if index < 0 or index >= len(self._groups):
+            raise IndexError(f"Group index {index} out of range (have {len(self._groups)} groups)")
+
         arr = self._resolve_to_ndarray(data)
 
         # Resolve string targets to integer values, validate group membership
@@ -751,6 +757,7 @@ class MultiLabelSegmentation:
         arrays: list[np.ndarray] = []
         for img in self._group_images:
             if img is None:
+                # intentional: enforce MITK uint16 contract, not self._dtype
                 arrays.append(np.zeros(shape, dtype=LABEL_DTYPE))
             else:
                 arrays.append(img.array)
