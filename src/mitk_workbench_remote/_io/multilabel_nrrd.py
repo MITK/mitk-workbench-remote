@@ -21,8 +21,9 @@
 Handles the 4D NRRD format used by MITK MultiLabelSegmentation. Label group properties
 are stored in the NRRD header key 'org.mitk.multilabel.segmentation.labelgroups' as JSON.
 
-High-level functions using LabelGroup/Label types are deferred to T9.
-This module provides raw dict-based functions.
+Raw dict-based functions (``read_multilabel_nrrd_raw``, ``write_multilabel_nrrd_raw``) do
+not depend on the domain classes. High-level functions (``read_multilabel_nrrd``,
+``write_multilabel_nrrd``) use deferred imports to avoid circular dependencies.
 """
 
 from __future__ import annotations
@@ -30,7 +31,10 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mitk_workbench_remote.multilabel import Label, LabelGroup, MultiLabelSegmentation
 
 import nrrd
 import numpy as np
@@ -178,3 +182,173 @@ def write_multilabel_nrrd_raw(
     buf = io.BytesIO()
     nrrd.write(buf, data, header)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Dict <-> domain object conversion helpers (use deferred imports)
+# ---------------------------------------------------------------------------
+
+
+def _label_from_dict(d: dict[str, Any]) -> Label:
+    """Build a Label from a raw label dict.
+
+    Skips value=0 check -- callers must filter out UNLABELED_VALUE before calling.
+
+    Args:
+        d: Raw label dict from the NRRD header JSON.
+
+    Returns:
+        A :class:`~mitk_workbench_remote.multilabel.Label`.
+    """
+    from mitk_workbench_remote.multilabel import Label
+
+    color_raw = d.get("color", [1.0, 1.0, 1.0])
+    return Label(
+        value=d["value"],
+        name=d.get("name", ""),
+        color=tuple(color_raw),
+        opacity=d.get("opacity", 1.0),
+        visible=d.get("visible", True),
+        locked=d.get("locked", False),
+        tracking_id=d.get("tracking_id"),
+        tracking_uid=d.get("tracking_uid"),
+        description=d.get("description"),
+    )
+
+
+def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[LabelGroup, list[Label]]:
+    """Build a LabelGroup and its Labels from a raw group dict.
+
+    Labels with value=0 (UNLABELED_VALUE) are silently skipped.
+
+    Args:
+        g: Raw group dict from the NRRD header JSON.
+
+    Returns:
+        Tuple of (LabelGroup with label_ids populated, list of Label objects).
+    """
+    from mitk_workbench_remote.multilabel import LabelGroup
+
+    group = LabelGroup(name=g.get("name"))
+    labels: list[Label] = []
+    for label_dict in g.get("labels", []):
+        if label_dict.get("value", 0) == 0:
+            continue  # skip UNLABELED_VALUE
+        label = _label_from_dict(label_dict)
+        group._label_ids.append(label.value)
+        labels.append(label)
+    return group, labels
+
+
+def _label_to_dict(label: Label) -> dict[str, Any]:
+    """Serialize a Label to a raw dict for NRRD header storage.
+
+    Args:
+        label: A :class:`~mitk_workbench_remote.multilabel.Label`.
+
+    Returns:
+        Dict suitable for inclusion in the labelgroups JSON.
+    """
+    d: dict[str, Any] = {
+        "value": label.value,
+        "name": label.name,
+        "color": list(label.color),
+        "opacity": label.opacity,
+        "visible": label.visible,
+        "locked": label.locked,
+    }
+    if label.tracking_id is not None:
+        d["tracking_id"] = label.tracking_id
+    if label.tracking_uid is not None:
+        d["tracking_uid"] = label.tracking_uid
+    if label.description is not None:
+        d["description"] = label.description
+    return d
+
+
+def _labelgroup_to_dict(group: LabelGroup, labels_dict: dict[int, Label]) -> dict[str, Any]:
+    """Serialize a LabelGroup to a raw dict for NRRD header storage.
+
+    Args:
+        group: A :class:`~mitk_workbench_remote.multilabel.LabelGroup`.
+        labels_dict: Global label registry from the parent segmentation.
+
+    Returns:
+        Dict suitable for inclusion in the labelgroups JSON.
+    """
+    d: dict[str, Any] = {
+        "labels": [_label_to_dict(labels_dict[v]) for v in group.label_ids if v in labels_dict]
+    }
+    if group.name is not None:
+        d["name"] = group.name
+    return d
+
+
+# ---------------------------------------------------------------------------
+# High-level I/O
+# ---------------------------------------------------------------------------
+
+
+def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
+    """Read a multilabel NRRD and return a MultiLabelSegmentation.
+
+    Args:
+        source: NRRD data as raw bytes, a file path string, or a Path object.
+
+    Returns:
+        A :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`.
+    """
+    from mitk_workbench_remote.image import Image
+    from mitk_workbench_remote.multilabel import MultiLabelSegmentation
+
+    array, groups_data, spatial_info = read_multilabel_nrrd_raw(source)
+
+    groups: list[LabelGroup] = []
+    labels_dict: dict[int, Label] = {}
+    group_images: list[Image] = []
+
+    for i, group_dict in enumerate(groups_data):
+        group, group_labels = _labelgroup_from_dict(group_dict)
+        groups.append(group)
+        for label in group_labels:
+            labels_dict[label.value] = label
+        group_images.append(
+            Image(
+                array[i],
+                spacing=spatial_info["spacing"],
+                origin=spatial_info["origin"],
+                direction=spatial_info["direction"],
+            )
+        )
+
+    return MultiLabelSegmentation(
+        groups=groups,
+        labels=labels_dict,
+        group_images=group_images,
+        spacing=spatial_info["spacing"],
+        origin=spatial_info["origin"],
+        direction=spatial_info["direction"],
+    )
+
+
+def write_multilabel_nrrd(seg: MultiLabelSegmentation, *, path: str | Path | None = None) -> bytes:
+    """Serialize a MultiLabelSegmentation to NRRD bytes.
+
+    Args:
+        seg: A :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`.
+        path: If given, also writes the NRRD to this file path.
+
+    Returns:
+        The NRRD file content as bytes.
+    """
+    groups_data = [_labelgroup_to_dict(g, seg._labels) for g in seg._groups]
+    array = seg._compose_array()
+    return write_multilabel_nrrd_raw(
+        array,
+        groups_data,
+        spacing=seg.spacing,
+        origin=seg.origin,
+        direction=seg.direction,
+        metadata=seg.metadata if seg.metadata else None,
+        path=path,
+    )

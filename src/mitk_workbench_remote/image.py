@@ -104,6 +104,35 @@ class Image:
     def __repr__(self) -> str:
         return f"Image(shape={self.shape}, dtype={self.dtype}, spacing={self._spacing})"
 
+    def _repr_html_(self) -> str:
+        import html as _html
+
+        e = _html.escape
+
+        dir_rows = " | ".join(
+            "  ".join(f"{v:.4g}" for v in row) for row in self._direction.tolist()
+        )
+
+        rows = [
+            f"<tr><th>shape</th><td>{e(str(self.shape))}</td></tr>",
+            f"<tr><th>dtype</th><td>{e(str(self.dtype))}</td></tr>",
+            f"<tr><th>spacing</th><td>{e(str(self._spacing))}</td></tr>",
+            f"<tr><th>origin</th><td>{e(str(self._origin))}</td></tr>",
+            f"<tr><th>direction</th><td>{e(dir_rows)}</td></tr>",
+        ]
+
+        if self._properties:
+            rows.append(
+                '<tr><th colspan="2">Fetched properties'
+                " <small><em>(snapshot at download time &mdash; additional or changed"
+                " properties on the Workbench side are not reflected here)</em></small>"
+                "</th></tr>"
+            )
+            for key, value in self._properties.items():
+                rows.append(f"<tr><th>{e(str(key))}</th><td>{e(str(value))}</td></tr>")
+
+        return "<table>" + "".join(rows) + "</table>"
+
     def __eq__(self, other: object) -> bool:
         """Return True if both images have identical pixel data and geometry.
 

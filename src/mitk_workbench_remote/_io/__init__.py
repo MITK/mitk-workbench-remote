@@ -21,8 +21,10 @@
 from mitk_workbench_remote._io.multilabel_nrrd import (
     is_multilabel_nrrd,
     parse_labelgroups_json,
+    read_multilabel_nrrd,
     read_multilabel_nrrd_raw,
     serialize_labelgroups_json,
+    write_multilabel_nrrd,
     write_multilabel_nrrd_raw,
 )
 from mitk_workbench_remote._io.nrrd import read_nrrd, write_nrrd
@@ -30,9 +32,11 @@ from mitk_workbench_remote._io.nrrd import read_nrrd, write_nrrd
 __all__ = [
     "is_multilabel_nrrd",
     "parse_labelgroups_json",
+    "read_multilabel_nrrd",
     "read_multilabel_nrrd_raw",
     "read_nrrd",
     "serialize_labelgroups_json",
+    "write_multilabel_nrrd",
     "write_multilabel_nrrd_raw",
     "write_nrrd",
 ]
