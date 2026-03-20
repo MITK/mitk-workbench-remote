@@ -24,13 +24,16 @@ import subprocess
 import sys
 import warnings
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from types import TracebackType
+from typing import Any
 from urllib.parse import urlparse
 
 from mitk_workbench_remote import errors
 from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
-from mitk_workbench_remote.transport import RestTransport
+from mitk_workbench_remote.transport import RestTransport, TransferMode
 
 
 def _find_listening_pid(port: int) -> int | None:
@@ -78,6 +81,145 @@ class WorkbenchInfo:
     api_version: str
     mitk_version: str
     url: str
+
+
+@dataclass(frozen=True)
+class PositionBounds:
+    """World-space axis-aligned bounding box of the scene.
+
+    Attributes:
+        min: Minimum corner ``[x, y, z]``, or ``None`` if no geometry is loaded.
+        max: Maximum corner ``[x, y, z]``, or ``None`` if no geometry is loaded.
+    """
+
+    min: tuple[float, float, float] | None
+    max: tuple[float, float, float] | None
+
+
+@dataclass(frozen=True)
+class SelectedPosition:
+    """Current crosshair position and scene bounds.
+
+    Attributes:
+        position: Crosshair position in world coordinates ``[x, y, z]``.
+        bounds: Scene bounding box.
+    """
+
+    position: tuple[float, float, float]
+    bounds: PositionBounds
+
+
+@dataclass(frozen=True)
+class TimeBounds:
+    """Time geometry bounds.
+
+    Attributes:
+        min_timepoint_ms: Start of the time range in milliseconds.
+        max_timepoint_ms: End of the time range in milliseconds.
+        steps: Total number of time steps.
+    """
+
+    min_timepoint_ms: float
+    max_timepoint_ms: float
+    steps: int
+
+
+@dataclass(frozen=True)
+class SelectedTime:
+    """Current time navigation state.
+
+    Attributes:
+        timepoint_ms: Selected time point in milliseconds.
+        timestep: Selected time step index (zero-based).
+        bounds: Time geometry bounds.
+    """
+
+    timepoint_ms: float
+    timestep: int
+    bounds: TimeBounds
+
+
+class ReinitMode(str, Enum):
+    """Controls automatic reinit behavior after show().
+
+    Attributes:
+        ALL_VISIBLE: Global reinit -- fit all views to all visible data.
+        NODE: Node reinit -- fit views to the newly shown node only.
+        NONE: Skip reinit entirely.
+    """
+
+    ALL_VISIBLE = "all"
+    NODE = "node"
+    NONE = "none"
+
+
+class RenderWindows(str, Enum):
+    """Which render windows to update.
+
+    Attributes:
+        ALL: Update all render windows.
+        TWO_D: Update only 2-D render windows.
+        THREE_D: Update only the 3-D render window.
+    """
+
+    ALL = "all"
+    TWO_D = "2d"
+    THREE_D = "3d"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ScreenshotFormat(str, Enum):
+    """Image encoding format for screenshots.
+
+    Attributes:
+        PNG: Lossless PNG encoding.
+        JPEG: Lossy JPEG encoding.
+    """
+
+    PNG = "png"
+    JPEG = "jpeg"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+def _infer_name(data: Any) -> str:
+    """Infer a default node name from the data object.
+
+    Rules:
+        1. ``str`` / ``Path`` -- file stem (e.g. ``"ct_scan.nrrd"`` -> ``"ct_scan"``)
+        2. ``Image`` -- ``"Image"``
+        3. ``MultiLabelSegmentation`` -- ``"Segmentation"``
+        4. ``numpy.ndarray`` -- ``"Array"``
+        5. Anything else -- ``type(data).__name__``
+    """
+    if isinstance(data, (str, Path)):
+        return Path(data).stem
+
+    from mitk_workbench_remote.image import Image as _Image
+
+    if isinstance(data, _Image):
+        return "Image"
+
+    try:
+        from mitk_workbench_remote.multilabel import MultiLabelSegmentation as _MLS
+
+        if isinstance(data, _MLS):
+            return "Segmentation"
+    except ImportError:
+        pass
+
+    try:
+        import numpy as np
+
+        if isinstance(data, np.ndarray):
+            return "Array"
+    except ImportError:
+        pass
+
+    return type(data).__name__
 
 
 class Workbench:
@@ -166,10 +308,100 @@ class Workbench:
         return self.ping()
 
     # ------------------------------------------------------------------
+    # show()
+    # ------------------------------------------------------------------
+
+    def show(
+        self,
+        data: Any,
+        *,
+        name: str | None = None,
+        visible: bool = True,
+        opacity: float | None = None,
+        color: tuple[float, float, float] | None = None,
+        parent: DataNode | str | None = None,
+        hide_others: bool = False,
+        reinit: ReinitMode = ReinitMode.ALL_VISIBLE,
+    ) -> DataNode:
+        """One-liner to load data into the Workbench and display it.
+
+        Creates a new node, uploads the data, sets display properties, and
+        optionally reinitializes the render views.
+
+        Args:
+            data: Data to show. Accepts file paths (``str`` / ``Path``),
+                :class:`~mitk_workbench_remote.image.Image`,
+                :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`,
+                numpy arrays, or any type handled by the converter registry.
+            name: Node display name. Inferred from ``data`` when ``None``.
+            visible: Whether the node is visible after showing.
+            opacity: Node opacity (0.0 - 1.0). ``None`` keeps the server default.
+            color: Node color as ``(r, g, b)``. ``None`` keeps the server default.
+            parent: Parent node (instance or UID string). ``None`` for top-level.
+            hide_others: When ``True``, hide all existing nodes before showing.
+            reinit: Auto-reinit mode after showing the data.
+
+        Returns:
+            The newly created :class:`~mitk_workbench_remote.node.DataNode`.
+        """
+        if name is None:
+            name = _infer_name(data)
+
+        if hide_others:
+            for existing_node in self.storage.list():
+                existing_node.update_properties(visible=False)
+
+        node = self.storage.create(name, parent=parent)
+
+        if isinstance(data, (str, Path)):
+            self._upload_file(node, Path(data))
+        else:
+            node.set_data(data)
+
+        props: dict[str, Any] = {"visible": visible}
+        if opacity is not None:
+            props["opacity"] = opacity
+        if color is not None:
+            props["color"] = color
+        node.update_properties(**props)
+
+        if reinit == ReinitMode.ALL_VISIBLE:
+            self.reinit()
+        elif reinit == ReinitMode.NODE:
+            self.reinit([node])
+
+        return node
+
+    def _upload_file(self, node: DataNode, path: Path) -> None:
+        """Upload a file to an existing node without deserializing.
+
+        The server parses the file format. After upload the node is refreshed
+        to pick up the server-assigned ``data_type``.
+        """
+        endpoint = f"/datastorage/nodes/{node.uid}/data"
+        mode = self._transport.transfer_mode
+
+        if mode == TransferMode.FILE_REFERENCE:
+            self._transport.put_file_reference(endpoint, file_path=str(path.resolve()))
+        elif mode == TransferMode.DIRECT:
+            self._transport.put_binary(
+                endpoint,
+                data=path.read_bytes(),
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Content-Disposition": f'attachment; filename="{path.name}"',
+                },
+            )
+        else:
+            raise RuntimeError(f"Unknown transfer mode: {mode}")
+
+        node.refresh()
+
+    # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
 
-    def update(self, *, windows: str = "all") -> None:
+    def update(self, *, windows: RenderWindows | str = RenderWindows.ALL) -> None:
         """Request all render windows to redraw.
 
         Use after batching data or property changes to make them visible
@@ -213,6 +445,146 @@ class Workbench:
             uids = [n.uid if isinstance(n, DataNode) else str(n) for n in nodes]
             body = {"uids": uids}
         self._transport.post("/rendering/reinit", json=body)
+
+    # ------------------------------------------------------------------
+    # Position
+    # ------------------------------------------------------------------
+
+    def get_position(self) -> SelectedPosition:
+        """Get the current crosshair position and scene bounds.
+
+        Returns:
+            A :class:`SelectedPosition` with the crosshair coordinates and
+            the world-space bounding box.
+
+        Raises:
+            RenderingError: If no render window is available.
+        """
+        body = self._transport.get("/rendering/selected-position").json()
+        x, y, z = body["position"]
+        b = body["bounds"]
+        bmin: tuple[float, float, float] | None = None
+        bmax: tuple[float, float, float] | None = None
+        if b["min"] is not None:
+            bx, by, bz = b["min"]
+            bmin = (bx, by, bz)
+        if b["max"] is not None:
+            mx, my, mz = b["max"]
+            bmax = (mx, my, mz)
+        return SelectedPosition(
+            position=(x, y, z),
+            bounds=PositionBounds(min=bmin, max=bmax),
+        )
+
+    def set_position(self, position: tuple[float, float, float] | list[float]) -> None:
+        """Move the crosshair to the given world position.
+
+        Args:
+            position: Target position ``[x, y, z]`` in world coordinates.
+
+        Raises:
+            RenderingError: If no render window is available.
+        """
+        self._transport.put("/rendering/selected-position", json={"position": list(position)})
+
+    # ------------------------------------------------------------------
+    # Time navigation
+    # ------------------------------------------------------------------
+
+    def get_time(self) -> SelectedTime:
+        """Get the current time navigation state.
+
+        Returns:
+            A :class:`SelectedTime` with the active time point, step, and bounds.
+
+        Raises:
+            RenderingError: If no render window is available.
+        """
+        body = self._transport.get("/rendering/selected-time").json()
+        b = body["bounds"]
+        return SelectedTime(
+            timepoint_ms=body["timepoint_ms"],
+            timestep=body["timestep"],
+            bounds=TimeBounds(
+                min_timepoint_ms=b["min_timepoint_ms"],
+                max_timepoint_ms=b["max_timepoint_ms"],
+                steps=b["steps"],
+            ),
+        )
+
+    def set_timepoint(self, timepoint_ms: float) -> None:
+        """Set the active time point.
+
+        Args:
+            timepoint_ms: Target time point in milliseconds.
+
+        Raises:
+            RenderingError: If no render window is available.
+        """
+        self._transport.put("/rendering/selected-time", json={"timepoint_ms": timepoint_ms})
+
+    def set_timestep(self, timestep: int) -> None:
+        """Set the active time step.
+
+        Args:
+            timestep: Target time step index (zero-based).
+
+        Raises:
+            RenderingError: If no render window is available.
+        """
+        self._transport.put("/rendering/selected-time", json={"timestep": timestep})
+
+    def get_timepoint(self) -> float:
+        """Convenience: return the current time point in milliseconds."""
+        return self.get_time().timepoint_ms
+
+    def get_timestep(self) -> int:
+        """Convenience: return the current time step index."""
+        return self.get_time().timestep
+
+    # ------------------------------------------------------------------
+    # Screenshot
+    # ------------------------------------------------------------------
+
+    def screenshot(
+        self,
+        *,
+        format: ScreenshotFormat | str = ScreenshotFormat.PNG,
+        width: int | None = None,
+        height: int | None = None,
+        path: str | Path | None = None,
+    ) -> bytes:
+        """Capture a screenshot of the active application window.
+
+        Args:
+            format: Image encoding format (``"png"`` or ``"jpeg"``).
+            width: Output width in pixels. Must be given together with ``height``.
+            height: Output height in pixels. Must be given together with ``width``.
+            path: If given, save the screenshot to this file path.
+
+        Returns:
+            Raw image bytes.
+
+        Raises:
+            ValueError: If only one of ``width`` / ``height`` is given.
+            RenderingError: If no render window is available.
+        """
+        if (width is None) != (height is None):
+            raise ValueError("width and height must both be given or both omitted")
+
+        params: dict[str, str | int] = {"format": format}
+        if width is not None:
+            params["width"] = width
+        if height is not None:
+            params["height"] = height
+
+        resp = self._transport.get_binary("/rendering/screenshot", params=params)
+        data = resp.content
+
+        if path is not None:
+            Path(path).write_bytes(data)
+
+        return data
 
     # ------------------------------------------------------------------
     # Lifecycle
