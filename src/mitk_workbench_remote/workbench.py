@@ -483,8 +483,13 @@ class Workbench:
             position: Target position ``[x, y, z]`` in world coordinates.
 
         Raises:
+            ValueError: If position does not have exactly 3 elements.
             RenderingError: If no render window is available.
         """
+        if len(position) != 3:
+            raise ValueError(
+                f"position must have exactly 3 elements [x, y, z], got {len(position)}"
+            )
         self._transport.put("/rendering/selected-position", json={"position": list(position)})
 
     # ------------------------------------------------------------------
@@ -549,7 +554,7 @@ class Workbench:
     def screenshot(
         self,
         *,
-        format: ScreenshotFormat | str = ScreenshotFormat.PNG,
+        fmt: ScreenshotFormat | str = ScreenshotFormat.PNG,
         width: int | None = None,
         height: int | None = None,
         path: str | Path | None = None,
@@ -557,7 +562,7 @@ class Workbench:
         """Capture a screenshot of the active application window.
 
         Args:
-            format: Image encoding format (``"png"`` or ``"jpeg"``).
+            fmt: Image encoding format (``"png"`` or ``"jpeg"``).
             width: Output width in pixels. Must be given together with ``height``.
             height: Output height in pixels. Must be given together with ``width``.
             path: If given, save the screenshot to this file path.
@@ -572,7 +577,7 @@ class Workbench:
         if (width is None) != (height is None):
             raise ValueError("width and height must both be given or both omitted")
 
-        params: dict[str, str | int] = {"format": format}
+        params: dict[str, str | int] = {"format": fmt}
         if width is not None:
             params["width"] = width
         if height is not None:
