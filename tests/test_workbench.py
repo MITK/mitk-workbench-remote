@@ -20,17 +20,28 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 import requests
 import responses
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport
-from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
+from mitk_workbench_remote.workbench import (
+    ReinitMode,
+    SelectedPosition,
+    SelectedTime,
+    TimeBounds,
+    Workbench,
+    WorkbenchInfo,
+    connect,
+)
 
 BASE = "http://127.0.0.1:8080"
 
@@ -472,4 +483,537 @@ def test_reinit_raises_rendering_error() -> None:
     wb = Workbench(t)
     with pytest.raises(errors.RenderingError):
         wb.reinit()
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for show() tests
+# ---------------------------------------------------------------------------
+
+_NODE_RESP = {
+    "data": {
+        "uid": "new-uid",
+        "name": "test",
+        "path": "/test",
+        "parent_uid": None,
+        "data_type": None,
+        "children_count": 0,
+        "timestamp": "2026-01-01T00:00:00Z",
+    }
+}
+
+_NODE_RESP_WITH_TYPE = {
+    "data": {
+        "uid": "new-uid",
+        "name": "test",
+        "path": "/test",
+        "parent_uid": None,
+        "data_type": "Image",
+        "children_count": 0,
+        "timestamp": "2026-01-01T00:00:00Z",
+    }
+}
+
+
+def _stub_create_and_upload() -> None:
+    """Register stubs for node create, data PUT, props PATCH, reinit, refresh."""
+    # create node
+    responses.add(responses.POST, _api("/datastorage/nodes"), json=_NODE_RESP, status=201)
+    # data upload (direct)
+    responses.add(responses.PUT, _api("/datastorage/nodes/new-uid/data"), body=b"", status=204)
+    # properties PATCH
+    responses.add(
+        responses.PATCH, _api("/datastorage/nodes/new-uid/properties"), body=b"", status=204
+    )
+    # reinit
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+    # refresh (for file uploads)
+    responses.add(responses.GET, _api("/datastorage/nodes/new-uid"), json=_NODE_RESP_WITH_TYPE)
+
+
+# ---------------------------------------------------------------------------
+# show() tests
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_show_creates_node_uploads_data_sets_properties() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    node = wb.show(img, name="MyImage")
+
+    assert node.uid == "new-uid"
+    # Verify create was called
+    create_call = responses.calls[0]
+    assert create_call.request.url == _api("/datastorage/nodes")
+    create_body = json.loads(create_call.request.body)
+    assert create_body["name"] == "MyImage"
+    wb.close()
+
+
+@responses.activate
+def test_show_infers_name_from_image() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img)
+
+    create_body = json.loads(responses.calls[0].request.body)
+    assert create_body["name"] == "Image"
+    wb.close()
+
+
+@responses.activate
+def test_show_infers_name_from_ndarray() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.show(np.zeros((2, 3, 4), dtype=np.float32))
+
+    create_body = json.loads(responses.calls[0].request.body)
+    assert create_body["name"] == "Array"
+    wb.close()
+
+
+@responses.activate
+def test_show_infers_name_from_path(tmp_path: Path) -> None:
+    _stub_create_and_upload()
+    f = tmp_path / "my_scan.nrrd"
+    f.write_bytes(b"fake-nrrd-data")
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.show(f)
+
+    create_body = json.loads(responses.calls[0].request.body)
+    assert create_body["name"] == "my_scan"
+    wb.close()
+
+
+@responses.activate
+def test_show_infers_name_from_unknown_type() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+
+    # _infer_name() runs before set_data(), so the node create POST fires
+    # before the TypeError; verify the name was correctly inferred.
+    with pytest.raises(TypeError):
+        wb.show(42)
+
+    create_body = json.loads(responses.calls[0].request.body)
+    assert create_body["name"] == "int"
+    wb.close()
+
+
+@responses.activate
+def test_show_uses_explicit_name() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="CustomName")
+
+    create_body = json.loads(responses.calls[0].request.body)
+    assert create_body["name"] == "CustomName"
+    wb.close()
+
+
+@responses.activate
+def test_show_hide_others() -> None:
+    # list returns two existing nodes
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes"),
+        json={
+            "data": [
+                {
+                    "uid": "a",
+                    "name": "A",
+                    "path": "/A",
+                    "parent_uid": None,
+                    "data_type": "Image",
+                    "children_count": 0,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "uid": "b",
+                    "name": "B",
+                    "path": "/B",
+                    "parent_uid": None,
+                    "data_type": "Image",
+                    "children_count": 0,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                },
+            ],
+            "meta": {"total_count": 2},
+        },
+    )
+    # hide calls: PATCH properties for a and b
+    responses.add(responses.PATCH, _api("/datastorage/nodes/a/properties"), body=b"", status=204)
+    responses.add(responses.PATCH, _api("/datastorage/nodes/b/properties"), body=b"", status=204)
+    _stub_create_and_upload()
+
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="New", hide_others=True)
+
+    # Check that visibility was set to False on existing nodes
+    hide_a = responses.calls[1]
+    assert "/datastorage/nodes/a/properties" in hide_a.request.url
+    assert json.loads(hide_a.request.body)["visible"] is False
+
+    hide_b = responses.calls[2]
+    assert "/datastorage/nodes/b/properties" in hide_b.request.url
+    assert json.loads(hide_b.request.body)["visible"] is False
+    wb.close()
+
+
+@responses.activate
+def test_show_reinit_all_by_default() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Test")
+
+    # Find reinit call
+    reinit_calls = [c for c in responses.calls if "/rendering/reinit" in c.request.url]
+    assert len(reinit_calls) == 1
+    body = json.loads(reinit_calls[0].request.body)
+    assert body == {}  # global reinit
+    wb.close()
+
+
+@responses.activate
+def test_show_reinit_node_only() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Test", reinit=ReinitMode.NODE)
+
+    reinit_calls = [c for c in responses.calls if "/rendering/reinit" in c.request.url]
+    assert len(reinit_calls) == 1
+    body = json.loads(reinit_calls[0].request.body)
+    assert body == {"uids": ["new-uid"]}
+    wb.close()
+
+
+@responses.activate
+def test_show_no_reinit() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Test", reinit=ReinitMode.NONE)
+
+    reinit_calls = [c for c in responses.calls if "/rendering/reinit" in c.request.url]
+    assert len(reinit_calls) == 0
+    wb.close()
+
+
+@responses.activate
+def test_show_passes_parent() -> None:
+    # create under parent
+    responses.add(
+        responses.POST,
+        _api("/datastorage/nodes/parent-uid/children"),
+        json=_NODE_RESP,
+        status=201,
+    )
+    responses.add(responses.PUT, _api("/datastorage/nodes/new-uid/data"), body=b"", status=204)
+    responses.add(
+        responses.PATCH, _api("/datastorage/nodes/new-uid/properties"), body=b"", status=204
+    )
+    responses.add(responses.POST, _api("/rendering/reinit"), body=b"", status=204)
+
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Child", parent="parent-uid")
+
+    assert "/datastorage/nodes/parent-uid/children" in responses.calls[0].request.url
+    wb.close()
+
+
+@responses.activate
+def test_show_sets_opacity_and_color() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Test", opacity=0.5, color=(1.0, 0.0, 0.0))
+
+    # Find PATCH call for the new node
+    patch_calls = [
+        c
+        for c in responses.calls
+        if "new-uid/properties" in c.request.url and c.request.method == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    body = json.loads(patch_calls[0].request.body)
+    assert body["visible"] is True
+    assert body["opacity"] == 0.5
+    assert body["color"] == {"type": "ColorProperty", "value": [1.0, 0.0, 0.0]}
+    wb.close()
+
+
+@responses.activate
+def test_show_omits_default_opacity() -> None:
+    _stub_create_and_upload()
+    t = _make_transport()
+    wb = Workbench(t)
+    img = Image(np.zeros((2, 3, 4), dtype=np.float32))
+    wb.show(img, name="Test")
+
+    patch_calls = [
+        c
+        for c in responses.calls
+        if "new-uid/properties" in c.request.url and c.request.method == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    body = json.loads(patch_calls[0].request.body)
+    assert "opacity" not in body
+    assert "color" not in body
+    wb.close()
+
+
+@responses.activate
+def test_show_file_path_uploads_raw_bytes(tmp_path: Path) -> None:
+    _stub_create_and_upload()
+    f = tmp_path / "scan.nrrd"
+    f.write_bytes(b"fake-nrrd-bytes")
+
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.show(f, name="Scan")
+
+    # Find the PUT data call
+    put_calls = [
+        c for c in responses.calls if "/data" in c.request.url and c.request.method == "PUT"
+    ]
+    assert len(put_calls) == 1
+    assert put_calls[0].request.body == b"fake-nrrd-bytes"
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# get_position / set_position
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_get_position_returns_dataclass() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/selected-position"),
+        json={
+            "position": [10.0, 20.0, 30.0],
+            "bounds": {"min": [-50.0, -50.0, -50.0], "max": [50.0, 50.0, 50.0]},
+        },
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    pos = wb.get_position()
+    assert isinstance(pos, SelectedPosition)
+    assert pos.position == (10.0, 20.0, 30.0)
+    assert pos.bounds.min == (-50.0, -50.0, -50.0)
+    assert pos.bounds.max == (50.0, 50.0, 50.0)
+    wb.close()
+
+
+@responses.activate
+def test_get_position_with_null_bounds() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/selected-position"),
+        json={
+            "position": [0.0, 0.0, 0.0],
+            "bounds": {"min": None, "max": None},
+        },
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    pos = wb.get_position()
+    assert pos.bounds.min is None
+    assert pos.bounds.max is None
+    wb.close()
+
+
+@responses.activate
+def test_set_position_sends_put() -> None:
+    responses.add(responses.PUT, _api("/rendering/selected-position"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.set_position((10.0, 20.0, 30.0))
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"position": [10.0, 20.0, 30.0]}
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# get_time / set_timepoint / set_timestep
+# ---------------------------------------------------------------------------
+
+_TIME_RESPONSE = {
+    "timepoint_ms": 1500.0,
+    "timestep": 3,
+    "bounds": {"min_timepoint_ms": 0.0, "max_timepoint_ms": 4500.0, "steps": 10},
+}
+
+
+@responses.activate
+def test_get_time_returns_dataclass() -> None:
+    responses.add(responses.GET, _api("/rendering/selected-time"), json=_TIME_RESPONSE)
+    t = _make_transport()
+    wb = Workbench(t)
+    time = wb.get_time()
+    assert isinstance(time, SelectedTime)
+    assert time.timepoint_ms == 1500.0
+    assert time.timestep == 3
+    assert isinstance(time.bounds, TimeBounds)
+    assert time.bounds.min_timepoint_ms == 0.0
+    assert time.bounds.max_timepoint_ms == 4500.0
+    assert time.bounds.steps == 10
+    wb.close()
+
+
+@responses.activate
+def test_set_timepoint_sends_put() -> None:
+    responses.add(responses.PUT, _api("/rendering/selected-time"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.set_timepoint(1500.0)
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"timepoint_ms": 1500.0}
+    wb.close()
+
+
+@responses.activate
+def test_set_timestep_sends_put() -> None:
+    responses.add(responses.PUT, _api("/rendering/selected-time"), body=b"", status=204)
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.set_timestep(3)
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"timestep": 3}
+    wb.close()
+
+
+@responses.activate
+def test_get_timepoint_returns_float() -> None:
+    responses.add(responses.GET, _api("/rendering/selected-time"), json=_TIME_RESPONSE)
+    t = _make_transport()
+    wb = Workbench(t)
+    assert wb.get_timepoint() == 1500.0
+    wb.close()
+
+
+@responses.activate
+def test_get_timestep_returns_int() -> None:
+    responses.add(responses.GET, _api("/rendering/selected-time"), json=_TIME_RESPONSE)
+    t = _make_transport()
+    wb = Workbench(t)
+    assert wb.get_timestep() == 3
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# screenshot
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_screenshot_returns_bytes() -> None:
+    png_data = b"\x89PNG\r\n\x1a\nfake"
+    responses.add(
+        responses.GET,
+        _api("/rendering/screenshot"),
+        body=png_data,
+        content_type="image/png",
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    result = wb.screenshot()
+    assert result == png_data
+    wb.close()
+
+
+@responses.activate
+def test_screenshot_with_dimensions() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/screenshot"),
+        body=b"img",
+        content_type="image/png",
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    wb.screenshot(width=800, height=600)
+    url = responses.calls[0].request.url
+    assert "width=800" in url
+    assert "height=600" in url
+    wb.close()
+
+
+def test_screenshot_raises_if_only_width() -> None:
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(ValueError, match="width and height must both"):
+        wb.screenshot(width=800)
+    wb.close()
+
+
+def test_screenshot_raises_if_only_height() -> None:
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(ValueError, match="width and height must both"):
+        wb.screenshot(height=600)
+    wb.close()
+
+
+@responses.activate
+def test_screenshot_saves_to_path(tmp_path: Path) -> None:
+    png_data = b"\x89PNG\r\n\x1a\nfake"
+    responses.add(
+        responses.GET,
+        _api("/rendering/screenshot"),
+        body=png_data,
+        content_type="image/png",
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    dest = tmp_path / "shot.png"
+    result = wb.screenshot(path=dest)
+    assert result == png_data
+    assert dest.read_bytes() == png_data
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# RENDER_WINDOW_NOT_AVAILABLE error mapping
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_render_window_not_available_raises_rendering_error() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/selected-position"),
+        json={
+            "error": {
+                "code": "RENDER_WINDOW_NOT_AVAILABLE",
+                "message": "StdMultiWidgetEditor is not open",
+            }
+        },
+        status=503,
+    )
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(errors.RenderingError):
+        wb.get_position()
     wb.close()
