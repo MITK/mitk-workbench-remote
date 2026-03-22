@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import os
 import secrets
 import shutil
@@ -37,6 +38,8 @@ from pathlib import Path
 from mitk_workbench_remote import errors
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench
+
+_log = logging.getLogger(__name__)
 
 _PREFERENCE_PATCH_FLAG: str = "--MITK.preferences-override"
 _EXECUTABLE_ENV_VAR: str = "MITK_WORKBENCH"
@@ -83,13 +86,16 @@ def discover(
         sorted by port number (ascending).
     """
     port_list = list(ports)
+    _log.info("Discovering workbenches on %d ports", len(port_list))
 
     def _probe(port: int) -> tuple[int, Workbench | None]:
         transport = RestTransport(f"http://localhost:{port}", timeout=timeout)
         try:
             transport.get("/health")
+            _log.debug("Port %d: found workbench", port)
             return port, Workbench(transport)
         except (errors.MitkError, OSError):
+            _log.debug("Port %d: no response", port)
             transport.close()
             return port, None
         except Exception:
@@ -105,6 +111,8 @@ def discover(
                 results.append((port, wb))
 
     results.sort(key=lambda t: t[0])
+    found_ports = [p for p, _ in results]
+    _log.info("Discovery complete: found %d instance(s) on ports %s", len(results), found_ports)
     return [wb for _, wb in results]
 
 
@@ -200,6 +208,8 @@ def launch(
 
     if token is None:
         token = secrets.token_hex(16)
+
+    _log.info("Launching workbench: %s on port %d", resolved_exe, port)
 
     fd, prefs_path = tempfile.mkstemp(suffix=".xml", prefix="mitk_prefs_")
     try:

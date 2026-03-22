@@ -25,6 +25,8 @@ Example:
     True
 """
 
+import logging
+
 from mitk_workbench_remote._version import __version__
 from mitk_workbench_remote.discovery import discover, launch
 from mitk_workbench_remote.errors import RenderingError, UnsupportedDataTypeError
@@ -72,3 +74,5 @@ __all__ = [
     "discover",
     "launch",
 ]
+
+logging.getLogger("mitk_workbench_remote").addHandler(logging.NullHandler())

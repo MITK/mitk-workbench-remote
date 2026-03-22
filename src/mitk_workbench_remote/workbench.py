@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 import warnings
@@ -34,6 +35,8 @@ from mitk_workbench_remote import errors
 from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport, TransferMode
+
+_log = logging.getLogger(__name__)
 
 
 def _find_listening_pid(port: int) -> int | None:
@@ -298,9 +301,11 @@ class Workbench:
         """
         try:
             response = self._transport.get("/health")
-            return response.ok
+            result = response.ok
         except Exception:
-            return False
+            result = False
+        _log.debug("[%s] ping -> %s", self.url, result)
+        return result
 
     @property
     def is_connected(self) -> bool:
@@ -346,6 +351,8 @@ class Workbench:
         """
         if name is None:
             name = _infer_name(data)
+
+        _log.info("[%s] Showing '%s'", self.url, name)
 
         if hide_others:
             for existing_node in self.storage.list():
@@ -440,9 +447,11 @@ class Workbench:
         if nodes is not None and len(nodes) == 0:
             raise ValueError("nodes must be None (global reinit) or a non-empty list")
         if nodes is None:
+            _log.info("[%s] Reinit: all visible", self.url)
             body: dict[str, object] = {}
         else:
             uids = [n.uid if isinstance(n, DataNode) else str(n) for n in nodes]
+            _log.info("[%s] Reinit: %d node(s)", self.url, len(uids))
             body = {"uids": uids}
         self._transport.post("/rendering/reinit", json=body)
 
@@ -460,6 +469,7 @@ class Workbench:
         Raises:
             RenderingError: If no render window is available.
         """
+        _log.debug("[%s] get_position", self.url)
         body = self._transport.get("/rendering/selected-position").json()
         x, y, z = body["position"]
         b = body["bounds"]
@@ -490,6 +500,7 @@ class Workbench:
             raise ValueError(
                 f"position must have exactly 3 elements [x, y, z], got {len(position)}"
             )
+        _log.debug("[%s] set_position %s", self.url, list(position))
         self._transport.put("/rendering/selected-position", json={"position": list(position)})
 
     # ------------------------------------------------------------------
@@ -616,6 +627,8 @@ class Workbench:
         if self._process is None:
             raise errors.MitkError("shutdown() is only valid for instances started with launch()")
 
+        _log.info("[%s] Shutting down", self.url)
+
         if sys.platform == "win32":
             # Find the process actually listening on the REST port — this may
             # differ from self._process.pid when MITK is launched via a
@@ -708,5 +721,6 @@ def connect(
     Returns:
         A :class:`Workbench` handle ready for use.
     """
+    _log.info("[%s] Connecting", url)
     transport = RestTransport(url, token=token, timeout=timeout, transfer_mode=transfer_mode)
     return Workbench(transport)

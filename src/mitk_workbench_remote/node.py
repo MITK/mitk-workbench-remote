@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import html as _html
+import logging
 import tempfile
 from enum import Enum
 from pathlib import Path
@@ -28,6 +29,8 @@ from mitk_workbench_remote import _io
 from mitk_workbench_remote.errors import TransferError, UnsupportedDataTypeError
 from mitk_workbench_remote.properties import _deserialize_property, _serialize_property
 from mitk_workbench_remote.transport import RestTransport, TransferMode
+
+_log = logging.getLogger(__name__)
 
 
 class PropertyScope(str, Enum):
@@ -263,6 +266,7 @@ class DataNode:
         Raises:
             NodeNotFoundError: If the node or property does not exist.
         """
+        _log.debug("[%s] get_property('%s', key='%s')", self._transport.base_url, self._name, key)
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
             params["context"] = context
@@ -295,6 +299,7 @@ class DataNode:
                 scope :attr:`~PropertyScope.NODE`; ignored at data scope.
         """
         self._validate_writable_scope(scope)
+        _log.debug("[%s] set_property('%s', key='%s')", self._transport.base_url, self._name, key)
         body = _serialize_property(key, value)
         params: dict[str, str] = {"property_scope": scope}
         if context is not None:
@@ -431,6 +436,13 @@ class DataNode:
                 in Python. Use :meth:`save_data` to download raw bytes instead.
         """
         dt = self._check_data_type_supported()
+        _log.info(
+            "[%s] Downloading data for '%s' (%s, %s)",
+            self._transport.base_url,
+            self._name,
+            dt,
+            self._transport.transfer_mode,
+        )
         nrrd_source = self._download_raw_source()
 
         if dt == "MultiLabelSegmentation":
@@ -522,9 +534,16 @@ class DataNode:
             TypeError: If no converter is registered for ``data``'s type.
         """
         nrrd_bytes = self._resolve_serialized_bytes(data)
+        mode = self._transport.transfer_mode
+        _log.info(
+            "[%s] Uploading data for '%s' (%d bytes, %s)",
+            self._transport.base_url,
+            self._name,
+            len(nrrd_bytes),
+            mode,
+        )
 
         endpoint = f"/datastorage/nodes/{self._uid}/data"
-        mode = self._transport.transfer_mode
 
         if mode == TransferMode.DIRECT:
             self._transport.put_binary(

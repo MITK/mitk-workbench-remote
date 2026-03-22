@@ -25,11 +25,14 @@ Converts between raw NRRD bytes and Image objects, handling spatial properties
 from __future__ import annotations
 
 import io
+import logging
 from pathlib import Path
 from typing import Any
 
 import nrrd
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 # NRRD header keys used for spatial properties
 _SPACE = "space"
@@ -63,6 +66,7 @@ def read_nrrd(source: bytes | str | Path) -> Any:
     spacing, origin, direction = _extract_spatial(header, ndim)
     metadata = _extract_custom_metadata(header)
 
+    _log.debug("read_nrrd: shape=%s dtype=%s", data.shape, data.dtype)
     return Image(
         data,
         spacing=spacing,
@@ -83,6 +87,7 @@ def write_nrrd(image: Any, path: str | Path | None = None) -> bytes:
     Returns:
         The NRRD file content as bytes.
     """
+    _log.debug("write_nrrd: shape=%s dtype=%s", image.array.shape, image.array.dtype)
     header = _build_header(image)
     _write_custom_metadata(header, image.metadata)
     arr = image.array

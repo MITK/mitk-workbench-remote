@@ -31,10 +31,13 @@ Built-in converters (registered at import time):
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -84,13 +87,16 @@ def register_converter(converter: ImageConverter) -> None:
     """
     with _converters_lock:
         _converters.append(converter)
+    _log.debug("Registered converter: %s", type(converter).__name__)
 
 
 def find_image_converter(obj: Any) -> ImageConverter | None:
     """Find the first converter that can handle the given object."""
     for converter in _converters:
         if converter.can_handle(obj):
+            _log.debug("Found converter for %s: %s", type(obj).__name__, type(converter).__name__)
             return converter
+    _log.debug("No converter found for %s", type(obj).__name__)
     return None
 
 

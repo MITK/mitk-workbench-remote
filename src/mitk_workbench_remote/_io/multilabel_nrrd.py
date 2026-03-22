@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +41,8 @@ import nrrd
 import numpy as np
 
 from mitk_workbench_remote._io.nrrd import _MITK_SPACE, _extract_spatial
+
+_log = logging.getLogger(__name__)
 
 _LABELGROUPS_KEY = "org.mitk.multilabel.segmentation.labelgroups"
 _MODALITY_KEY = "modality"
@@ -302,6 +305,12 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
     from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
     array, groups_data, spatial_info = read_multilabel_nrrd_raw(source)
+    _log.debug(
+        "read_multilabel_nrrd: shape=%s dtype=%s groups=%d",
+        array.shape,
+        array.dtype,
+        len(groups_data),
+    )
 
     groups: list[LabelGroup] = []
     labels_dict: dict[int, Label] = {}
@@ -343,6 +352,12 @@ def write_multilabel_nrrd(seg: MultiLabelSegmentation, *, path: str | Path | Non
     """
     groups_data = [_labelgroup_to_dict(g, seg._labels) for g in seg._groups]
     array = seg._compose_array()
+    _log.debug(
+        "write_multilabel_nrrd: shape=%s dtype=%s groups=%d",
+        array.shape,
+        array.dtype,
+        len(groups_data),
+    )
     return write_multilabel_nrrd_raw(
         array,
         groups_data,
