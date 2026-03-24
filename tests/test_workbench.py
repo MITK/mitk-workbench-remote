@@ -801,6 +801,26 @@ def test_show_file_path_uploads_raw_bytes(tmp_path: Path) -> None:
     wb.close()
 
 
+@responses.activate
+def test_show_file_path_file_reference_mode(tmp_path: Path) -> None:
+    _stub_create_and_upload()
+    f = tmp_path / "scan.nrrd"
+    f.write_bytes(b"fake-nrrd-bytes")
+
+    t = _make_transport(transfer_mode="file-reference")
+    wb = Workbench(t)
+    wb.show(f, name="Scan")
+
+    put_calls = [
+        c for c in responses.calls if "/data" in c.request.url and c.request.method == "PUT"
+    ]
+    assert len(put_calls) == 1
+    body = json.loads(put_calls[0].request.body)
+    assert body["transfer"]["mode"] == "file-reference"
+    assert body["transfer"]["file_path"] == str(f.resolve())
+    wb.close()
+
+
 # ---------------------------------------------------------------------------
 # get_position / set_position
 # ---------------------------------------------------------------------------
@@ -852,6 +872,14 @@ def test_set_position_sends_put() -> None:
     wb.set_position((10.0, 20.0, 30.0))
     body = json.loads(responses.calls[0].request.body)
     assert body == {"position": [10.0, 20.0, 30.0]}
+    wb.close()
+
+
+def test_set_position_raises_for_wrong_length() -> None:
+    t = _make_transport()
+    wb = Workbench(t)
+    with pytest.raises(ValueError, match="exactly 3 elements"):
+        wb.set_position([1.0, 2.0])
     wb.close()
 
 
