@@ -349,6 +349,8 @@ class RestTransport:
             raise errors.TransferError(message)
         if code == "RENDERING_ERROR":
             raise errors.RenderingError(message)
+        if code == "RENDER_WINDOW_NOT_AVAILABLE":
+            raise errors.RenderingError(message)
         raise errors.ApiError(status, code, message)
 
     def _is_localhost(self) -> bool:

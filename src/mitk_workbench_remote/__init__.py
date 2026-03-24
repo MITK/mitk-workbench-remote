@@ -32,7 +32,19 @@ from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, LabelGroup, MultiLabelSegmentation
 from mitk_workbench_remote.node import DataNode, PropertyScope
 from mitk_workbench_remote.storage import DataStorage
-from mitk_workbench_remote.workbench import Workbench, WorkbenchInfo, connect
+from mitk_workbench_remote.transport import TransferMode
+from mitk_workbench_remote.workbench import (
+    PositionBounds,
+    ReinitMode,
+    RenderWindows,
+    ScreenshotFormat,
+    SelectedPosition,
+    SelectedTime,
+    TimeBounds,
+    Workbench,
+    WorkbenchInfo,
+    connect,
+)
 
 __all__ = [
     "LABEL_DTYPE",
@@ -42,8 +54,16 @@ __all__ = [
     "Label",
     "LabelGroup",
     "MultiLabelSegmentation",
+    "PositionBounds",
     "PropertyScope",
+    "ReinitMode",
+    "RenderWindows",
     "RenderingError",
+    "ScreenshotFormat",
+    "SelectedPosition",
+    "SelectedTime",
+    "TimeBounds",
+    "TransferMode",
     "UnsupportedDataTypeError",
     "Workbench",
     "WorkbenchInfo",

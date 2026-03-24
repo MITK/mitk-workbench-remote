@@ -2,7 +2,7 @@
 
 **Remote control for MITK Workbench from Python**
 
-[![Python 3.10](https://img.shields.io/badge/python-3.x-blue.svg)](https://python.org)
+[![Python 3.10](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![SemVer](https://img.shields.io/badge/semver-2.0.0-blue.svg)](https://semver.org/)
 [![Documentation](https://readthedocs.org/projects/mitk-workbench-remote/badge/?version=latest)](https://mitk-workbench-remote.readthedocs.io/en/latest/)
