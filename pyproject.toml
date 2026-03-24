@@ -42,7 +42,15 @@ dev = [
     "ruff",
     "mypy",
 ]
-docs = ["sphinx", "sphinx-rtd-theme", "myst-parser"]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+    "sphinx-autodoc-typehints",
+    "nbsphinx",
+    "pypandoc-binary",
+    "ipykernel",
+]
 
 [project.urls]
 Homepage = "https://github.com/MITK/mitk-workbench-remote"

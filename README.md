@@ -22,6 +22,17 @@ wb.show("scan.nrrd", opacity=0.8)
 wb.show(my_array, name="Prediction", color=(1.0, 0.5, 0.0))
 ```
 
+## Features
+
+- **`wb.show()` one-liner** for files, numpy arrays, SimpleITK images, and mlarray objects
+- **DataStorage CRUD** - list, filter, create, and remove data nodes
+- **Image transfer** with automatic transfer mode negotiation (direct HTTP or file-reference)
+- **MultiLabel segmentation editing** - groups, labels, pixel data, and full round-trip
+- **Rendering control** - crosshair position, reinit, and screenshots
+- **Discovery and launch** - find running instances or start new ones
+- **Converter registry** for custom image types
+- **Structured logging** via Python's `logging` module
+
 ## Requirements
 
 A running MITK Workbench instance with REST API enabled.
@@ -46,6 +57,17 @@ cd mitk-workbench-remote
 pip install -e ".[dev]"
 pytest
 ```
+
+## Logging
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+## Examples
+
+See [docs/examples/](docs/examples/) for Jupyter notebooks covering common workflows.
 
 ## Documentation
 

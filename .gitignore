@@ -11,6 +11,7 @@ avid.config
 
 ########## Documentation / Sphinx related
 /docs/build/*
+/docs/_build/*
 /docs/source/_autosummary/*
 
 ########## Git related
