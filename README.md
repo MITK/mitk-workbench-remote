@@ -62,5 +62,16 @@ Pre-release and development builds use [PEP 440](https://peps.python.org/pep-044
 equivalent to SemVer pre-release identifiers, only the syntax differs.
 
 ## License
-
+Please ensure your usage complies with the code license.
 Apache-2.0 — see [LICENSE](LICENSE).
+
+## 🆘 Support & Contributing
+
+- 📖 Documentation: Full API documentation available
+- 🐛 Issues: Report bugs and feature requests
+- 💬 Discussion: Join our community for questions and tips
+- 🔧 Contributing: We welcome contributions. More details can be found in the dedicated Contribution Guide.
+
+## Copyright & License
+
+Copyright © German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC).
