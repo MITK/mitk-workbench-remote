@@ -17,7 +17,8 @@ import mitk_workbench_remote as mw
 # Connect to a running Workbench
 wb = mw.connect(port=8080)
 
-# Show a file, an Image object or any data format directly supported (e.g. numpy array, sitk, mlarray)
+# Show a file, an Image object or any data format directly supported
+# (e.g. numpy array, sitk, mlarray)
 wb.show("scan.nrrd", opacity=0.8)
 wb.show(my_array, name="Prediction", color=(1.0, 0.5, 0.0))
 ```
