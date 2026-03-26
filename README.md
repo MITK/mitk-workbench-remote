@@ -17,7 +17,7 @@ import mitk_workbench_remote as mw
 # Connect to a running Workbench
 wb = mw.connect(port=8080)
 
-# Show a file, a numpy array, or an Image object
+# Show a file, an Image object or any data format directly supported (e.g. numpy array, sitk, mlarray)
 wb.show("scan.nrrd", opacity=0.8)
 wb.show(my_array, name="Prediction", color=(1.0, 0.5, 0.0))
 ```
@@ -32,7 +32,7 @@ A running MITK Workbench instance with REST API enabled.
 pip install mitk-workbench-remote
 ```
 
-With optional image format support (SimpleITK and mlarray):
+With optional image format support ([SimpleITK](https://simpleitk.org/) and [MLArray](https://github.com/MIC-DKFZ/mlarray/)):
 
 ```bash
 pip install mitk-workbench-remote[all]
