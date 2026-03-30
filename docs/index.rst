@@ -14,7 +14,7 @@ Quick example::
 
    import mitk_workbench_remote as mw
 
-   wb = mw.connect(port=8080)
+   wb = mw.connect("http://localhost:8080")
    wb.show("scan.nrrd", opacity=0.8)
    wb.show(my_array, name="Prediction", color=(1.0, 0.5, 0.0))
 

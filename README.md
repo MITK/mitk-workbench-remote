@@ -15,7 +15,7 @@
 import mitk_workbench_remote as mw
 
 # Connect to a running Workbench
-wb = mw.connect(port=8080)
+wb = mw.connect("http://localhost:8080")
 
 # Show a file, a numpy array, or an Image object
 wb.show("scan.nrrd", opacity=0.8)
