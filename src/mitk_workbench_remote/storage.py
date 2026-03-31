@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import logging
 from collections.abc import Iterator
 from typing import Any
 
@@ -29,6 +30,8 @@ from mitk_workbench_remote import errors
 from mitk_workbench_remote.node import DataNode, PropertyScope
 from mitk_workbench_remote.properties import _serialize_property
 from mitk_workbench_remote.transport import RestTransport
+
+_log = logging.getLogger(__name__)
 
 
 def _to_filter_str(value: Any) -> str:
@@ -79,6 +82,12 @@ class DataStorage:
         Returns:
             List of :class:`~mitk_workbench_remote.node.DataNode` objects.
         """
+        _log.debug(
+            "[%s] list(data_type=%s, toplevel=%s)",
+            self._transport.base_url,
+            data_type,
+            toplevel,
+        )
         params: dict[str, str | int] = {"limit": 1000, "offset": 0}
         if data_type is not None:
             params["data_type"] = data_type
@@ -94,6 +103,7 @@ class DataStorage:
             params["offset"] = int(params["offset"]) + len(body["data"])
             if params["offset"] >= total_count:
                 break
+        _log.debug("[%s] list -> %d node(s)", self._transport.base_url, len(nodes))
         return nodes
 
     def filter(
@@ -165,6 +175,7 @@ class DataStorage:
         Raises:
             NodeNotFoundError: If no node with this UID exists.
         """
+        _log.debug("[%s] get(%s)", self._transport.base_url, uid)
         resp = self._transport.get(f"/datastorage/nodes/{uid}")
         return DataNode._from_node_dict(resp.json()["data"], self._transport)
 
@@ -189,6 +200,7 @@ class DataStorage:
         Returns:
             The newly created :class:`~mitk_workbench_remote.node.DataNode`.
         """
+        _log.debug("[%s] create('%s', parent=%s)", self._transport.base_url, name, parent)
         body = {"name": name}
         if parent is None:
             resp = self._transport.post("/datastorage/nodes", json=body)

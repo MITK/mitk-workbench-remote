@@ -30,6 +30,8 @@ Classes:
 
 from __future__ import annotations
 
+import logging
+import time
 import urllib.parse
 from dataclasses import dataclass, field
 from enum import Enum
@@ -39,6 +41,8 @@ from typing import Any
 import requests
 
 from mitk_workbench_remote import errors
+
+_log = logging.getLogger(__name__)
 
 
 class TransferMode(str, Enum):
@@ -204,6 +208,13 @@ class RestTransport:
                 mitk_version=data.get("mitk_version", ""),
                 transfer_modes=tuple(caps.get("transfer_modes", [])),
             )
+            _log.debug(
+                "[%s] Server info: %s %s, transfer modes: %s",
+                self._base_url,
+                self._server_info.name,
+                self._server_info.mitk_version,
+                self._server_info.transfer_modes,
+            )
         return self._server_info
 
     @property
@@ -216,6 +227,12 @@ class RestTransport:
                 restrictions_active=data["restrictions_active"],
                 max_active_temp_dirs_per_ip=data["max_active_temp_dirs_per_ip"],
                 allowed_paths=tuple(data.get("allowed_paths", [])),
+            )
+            _log.debug(
+                "[%s] File-access config: mode=%s, restrictions=%s",
+                self._base_url,
+                self._file_access_config.mode,
+                self._file_access_config.restrictions_active,
             )
         return self._file_access_config
 
@@ -310,12 +327,26 @@ class RestTransport:
         return f"{self._base_url}/api/v1{path}"
 
     def _request(self, method: str, path: str, **kwargs: Any) -> RestResponse:
+        t0 = time.monotonic()
         try:
             response = self._session.request(
                 method, self._url(path), timeout=self._timeout, **kwargs
             )
         except requests.exceptions.ConnectionError as exc:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            _log.debug(
+                "[%s] %s %s -> ConnectionError (%.0fms)", self._base_url, method, path, elapsed_ms
+            )
             raise errors.MitkConnectionError(str(exc)) from exc
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        _log.debug(
+            "[%s] %s %s -> %d (%.0fms)",
+            self._base_url,
+            method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
         return self._handle_response(response)
 
     def _handle_response(self, response: requests.Response) -> RestResponse:
@@ -365,5 +396,17 @@ class RestTransport:
         # would only be needed to learn supported modes, which is irrelevant when
         # the only viable mode is DIRECT regardless.
         if self._is_localhost() and TransferMode.FILE_REFERENCE in self.server_info.transfer_modes:
+            _log.info(
+                "[%s] Transfer mode: file-reference (localhost + server support)",
+                self._base_url,
+            )
             return TransferMode.FILE_REFERENCE
+        if self._is_localhost():
+            _log.warning(
+                "[%s] file-reference unavailable (not in server capabilities), "
+                "falling back to direct",
+                self._base_url,
+            )
+        else:
+            _log.info("[%s] Transfer mode: direct (remote server)", self._base_url)
         return TransferMode.DIRECT
