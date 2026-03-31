@@ -50,6 +50,7 @@ docs = [
     "nbsphinx",
     "pypandoc-binary",
     "ipykernel",
+    "sphinx-copybutton",
 ]
 
 [project.urls]

@@ -593,18 +593,21 @@ def test_show_infers_name_from_path(tmp_path: Path) -> None:
 
 
 @responses.activate
-def test_show_infers_name_from_unknown_type() -> None:
+def test_show_cleans_up_orphan_on_unsupported_type() -> None:
     _stub_create_and_upload()
+    # show() must DELETE the created node when set_data raises TypeError
+    responses.add(responses.DELETE, _api("/datastorage/nodes/new-uid"), body=b"", status=204)
     t = _make_transport()
     wb = Workbench(t)
 
-    # _infer_name() runs before set_data(), so the node create POST fires
-    # before the TypeError; verify the name was correctly inferred.
     with pytest.raises(TypeError):
         wb.show(42)
 
     create_body = json.loads(responses.calls[0].request.body)
     assert create_body["name"] == "int"
+    # Verify the cleanup DELETE was issued
+    delete_calls = [c for c in responses.calls if c.request.method == "DELETE"]
+    assert len(delete_calls) == 1
     wb.close()
 
 

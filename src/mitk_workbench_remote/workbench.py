@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import subprocess
 import sys
@@ -360,10 +361,15 @@ class Workbench:
 
         node = self.storage.create(name, parent=parent)
 
-        if isinstance(data, (str, Path)):
-            self._upload_file(node, Path(data))
-        else:
-            node.set_data(data)
+        try:
+            if isinstance(data, (str, Path)):
+                self._upload_file(node, Path(data))
+            else:
+                node.set_data(data)
+        except Exception:
+            with contextlib.suppress(Exception):
+                node.remove()
+            raise
 
         props: dict[str, Any] = {"visible": visible}
         if opacity is not None:

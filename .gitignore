@@ -13,6 +13,7 @@ avid.config
 /docs/build/*
 /docs/_build/*
 /docs/source/_autosummary/*
+.ipynb_checkpoints/
 
 ########## Git related
 
