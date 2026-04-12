@@ -559,12 +559,12 @@ def test_set_property_passes_raw_dict_through() -> None:
 
 
 # ---------------------------------------------------------------------------
-# delete_property
+# remove_property
 # ---------------------------------------------------------------------------
 
 
 @responses.activate
-def test_delete_property_sends_delete_request() -> None:
+def test_remove_property_sends_delete_request() -> None:
     node = _make_node()
     responses.add(
         responses.DELETE,
@@ -572,12 +572,12 @@ def test_delete_property_sends_delete_request() -> None:
         body=b"",
         status=204,
     )
-    node.delete_property("myProp")
+    node.remove_property("myProp")
     assert len(responses.calls) == 1
 
 
 @responses.activate
-def test_delete_property_passes_scope_param() -> None:
+def test_remove_property_passes_scope_param() -> None:
     node = _make_node()
     responses.add(
         responses.DELETE,
@@ -585,7 +585,7 @@ def test_delete_property_passes_scope_param() -> None:
         body=b"",
         status=204,
     )
-    node.delete_property("myProp", scope=PropertyScope.DATA)
+    node.remove_property("myProp", scope=PropertyScope.DATA)
     assert "property_scope=data" in responses.calls[0].request.url
 
 
@@ -856,7 +856,7 @@ def test_get_data_include_properties_false() -> None:
     image = node.get_data(include_properties=False)
     # properties should not contain server-fetched properties
     # (may contain NRRD custom fields, but not node properties)
-    assert "name" not in image.metadata
+    assert "name" not in image.properties
 
 
 @responses.activate
@@ -877,8 +877,8 @@ def test_get_data_include_properties_true() -> None:
         status=200,
     )
     image = node.get_data(include_properties=True)
-    assert image.metadata.get("imagescalar.min") == 0.0
-    assert image.metadata.get("imagescalar.max") == 255.0
+    assert image.get_property("imagescalar.min") == 0.0
+    assert image.get_property("imagescalar.max") == 255.0
 
 
 @responses.activate

@@ -78,6 +78,6 @@ class SitkConverter:
         sitk_image.SetOrigin(image.origin)
         direction_flat = image.direction.flatten().tolist()
         sitk_image.SetDirection(direction_flat)
-        for key, value in image.metadata.items():
+        for key, value in image.properties.items():
             sitk_image.SetMetaData(key, str(value))
         return sitk_image

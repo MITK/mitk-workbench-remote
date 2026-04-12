@@ -76,6 +76,6 @@ class MLArrayConverter:
             result.origin = image.origin
         if hasattr(result, "direction"):
             result.direction = image.direction.tolist()
-        if image.metadata and hasattr(result, "meta") and hasattr(result.meta, "extra"):
-            result.meta.extra = dict(image.metadata)
+        if image.properties and hasattr(result, "meta") and hasattr(result.meta, "extra"):
+            result.meta.extra = dict(image.properties)
         return result

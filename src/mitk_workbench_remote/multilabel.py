@@ -264,7 +264,7 @@ class MultiLabelSegmentation:
         spacing: Voxel spacing (3D).
         origin: World-space origin (3D).
         direction: Direction cosine matrix (3x3).
-        properties: Data-scope metadata dict.
+        properties: Data-scope properties dict.
 
     Raises:
         ValueError: On shape/geometry inconsistency or duplicate/missing label IDs.
@@ -433,9 +433,45 @@ class MultiLabelSegmentation:
         return self._direction
 
     @property
-    def metadata(self) -> dict[str, Any]:
-        """Data-scope properties/metadata dict."""
-        return self._properties
+    def properties(self) -> dict[str, Any]:
+        """Data-scope properties dict."""
+        return dict(self._properties)
+
+    @property
+    def property_keys(self) -> list[str]:
+        """List of property keys."""
+        return list(self._properties.keys())
+
+    def get_property(self, key: str) -> Any:
+        """Get a property by key.
+
+        Args:
+            key: Property key.
+
+        Returns:
+            The property value, or ``None`` if not found.
+        """
+        return self._properties.get(key)
+
+    def set_property(self, key: str, value: Any) -> None:
+        """Set a property by key.
+
+        Args:
+            key: Property key.
+            value: Property value.
+        """
+        self._properties[key] = value
+
+    def remove_property(self, key: str) -> None:
+        """Remove a property by key.
+
+        Args:
+            key: Property key.
+
+        Raises:
+            KeyError: If the key does not exist.
+        """
+        del self._properties[key]
 
     # ------------------------------------------------------------------
     # Lookup

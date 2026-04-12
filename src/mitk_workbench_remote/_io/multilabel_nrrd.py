@@ -136,7 +136,7 @@ def write_multilabel_nrrd_raw(
     spacing: tuple[float, ...],
     origin: tuple[float, ...],
     direction: np.ndarray,
-    metadata: dict[str, Any] | None = None,
+    properties: dict[str, Any] | None = None,
     path: str | Path | None = None,
 ) -> bytes:
     """Write a 4D multilabel NRRD.
@@ -147,7 +147,7 @@ def write_multilabel_nrrd_raw(
         spacing: Voxel spacing for the spatial dimensions.
         origin: World-space origin.
         direction: Direction cosine matrix for spatial dims.
-        metadata: Additional custom properties for the header.
+        properties: Additional custom properties for the header.
         path: If given, writes to this file path. Always returns bytes.
 
     Returns:
@@ -174,8 +174,8 @@ def write_multilabel_nrrd_raw(
     header[_LABELGROUPS_KEY] = serialize_labelgroups_json(groups_data)
     header[_MODALITY_KEY] = _MODALITY_VALUE
 
-    if metadata:
-        for key, value in metadata.items():
+    if properties:
+        for key, value in properties.items():
             header[key] = value
 
     if path is not None:
@@ -364,6 +364,6 @@ def write_multilabel_nrrd(seg: MultiLabelSegmentation, *, path: str | Path | Non
         spacing=seg.spacing,
         origin=seg.origin,
         direction=seg.direction,
-        metadata=seg.metadata if seg.metadata else None,
+        properties=seg.properties if seg.properties else None,
         path=path,
     )

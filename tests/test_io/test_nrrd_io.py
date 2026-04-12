@@ -96,8 +96,8 @@ def test_custom_metadata_roundtrip() -> None:
     img = Image(arr, properties=meta)
     nrrd_bytes = write_nrrd(img)
     img2 = read_nrrd(nrrd_bytes)
-    assert img2.metadata.get("my_custom_field") == "hello_world"
-    assert img2.metadata.get("another_field") == "42"
+    assert img2.get_property("my_custom_field") == "hello_world"
+    assert img2.get_property("another_field") == "42"
 
 
 # ---------------------------------------------------------------------------

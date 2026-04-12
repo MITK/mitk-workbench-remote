@@ -64,7 +64,7 @@ def read_nrrd(source: bytes | str | Path) -> Any:
 
     ndim = _spatial_ndim(header, data.ndim)
     spacing, origin, direction = _extract_spatial(header, ndim)
-    metadata = _extract_custom_metadata(header)
+    metadata = _extract_custom_properties(header)
 
     _log.debug("read_nrrd: shape=%s dtype=%s", data.shape, data.dtype)
     return Image(
@@ -89,7 +89,7 @@ def write_nrrd(image: Any, path: str | Path | None = None) -> bytes:
     """
     _log.debug("write_nrrd: shape=%s dtype=%s", image.array.shape, image.array.dtype)
     header = _build_header(image)
-    _write_custom_metadata(header, image.metadata)
+    _write_custom_properties(header, image.properties)
     arr = image.array
 
     if path is not None:
@@ -184,7 +184,7 @@ def _build_header(image: Any) -> dict[str, Any]:
     return header
 
 
-def _extract_custom_metadata(header: dict[str, Any]) -> dict[str, Any]:
+def _extract_custom_properties(header: dict[str, Any]) -> dict[str, Any]:
     """Extract custom key-value fields from the NRRD header.
 
     pynrrd stores custom `:=` fields in the header alongside standard fields.
@@ -231,29 +231,29 @@ def _extract_custom_metadata(header: dict[str, Any]) -> dict[str, Any]:
         "space units",
         "measurement frame",
     }
-    metadata: dict[str, Any] = {}
+    properties: dict[str, Any] = {}
     for key, value in header.items():
         if key.lower() not in standard_keys:
-            metadata[key] = value
-    return metadata
+            properties[key] = value
+    return properties
 
 
-def _write_custom_metadata(header: dict[str, Any], metadata: dict[str, Any]) -> None:
+def _write_custom_properties(header: dict[str, Any], properties: dict[str, Any]) -> None:
     """Write properties dict as custom fields in the NRRD header.
 
     Args:
         header: NRRD header dict to modify in-place.
-        metadata: Custom key-value pairs to add.
+        properties: Custom key-value pairs to add.
 
     Raises:
-        ValueError: If any metadata key conflicts with a standard NRRD header field
+        ValueError: If any properties key conflicts with a standard NRRD header field
             already present in *header*.
     """
-    conflicts = [k for k in metadata if k in header]
+    conflicts = [k for k in properties if k in header]
     if conflicts:
         raise ValueError(
-            f"Metadata keys conflict with standard NRRD header fields: {conflicts!r}."
-            " Remove these keys from the image metadata before writing."
+            f"Properties keys conflict with standard NRRD header fields: {conflicts!r}."
+            " Remove these keys from the image properties before writing."
         )
-    for key, value in metadata.items():
+    for key, value in properties.items():
         header[key] = value

@@ -310,8 +310,8 @@ class DataNode:
             params=params,
         )
 
-    def delete_property(self, key: str, *, scope: PropertyScope = PropertyScope.NODE) -> None:
-        """Delete a property by key.
+    def remove_property(self, key: str, *, scope: PropertyScope = PropertyScope.NODE) -> None:
+        """Remove a property by key.
 
         Args:
             key: Property name to remove.
@@ -593,15 +593,15 @@ class DataNode:
             from mitk_workbench_remote.image import Image
             from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
-            metadata: dict[str, Any] = {}
+            properties: dict[str, Any] = {}
             if isinstance(data, (MultiLabelSegmentation, Image)):
-                metadata = data.metadata
+                properties = data.properties
             else:
                 converter = find_image_converter(data)
                 if converter is not None:
-                    metadata = converter.extract_metadata(data)
-            if metadata:
-                self.update_properties(scope=PropertyScope.DATA, **metadata)
+                    properties = converter.extract_metadata(data)
+            if properties:
+                self.update_properties(scope=PropertyScope.DATA, **properties)
 
     def _resolve_serialized_bytes(self, data: Any) -> bytes:
         """Convert data to serialized bytes for upload.

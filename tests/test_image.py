@@ -67,15 +67,15 @@ def test_image_custom_direction() -> None:
     np.testing.assert_array_equal(img.direction, d)
 
 
-def test_image_default_metadata_is_empty_dict() -> None:
+def test_image_default_properties_is_empty_dict() -> None:
     img = Image(np.zeros((3, 4, 5)))
-    assert img.metadata == {}
+    assert img.properties == {}
 
 
-def test_image_custom_metadata() -> None:
+def test_image_custom_properties() -> None:
     meta = {"key1": "value1", "key2": 42}
     img = Image(np.zeros((3, 4, 5)), properties=meta)
-    assert img.metadata == meta
+    assert img.properties == meta
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def test_image_from_converter_extracts_geometry() -> None:
         img = Image("fake_data")
         assert img.spacing == (0.5, 1.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)
-        assert img.metadata == {"my_key": "my_value"}
+        assert img.properties == {"my_key": "my_value"}
 
 
 def test_image_explicit_kwargs_override_converter_geometry() -> None:
@@ -153,7 +153,7 @@ def test_image_explicit_kwargs_override_converter_geometry() -> None:
         img = Image("fake_data", spacing=(2.0, 2.0, 2.0), properties={"custom": True})
         assert img.spacing == (2.0, 2.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)  # not overridden
-        assert img.metadata == {"custom": True}  # overridden
+        assert img.properties == {"custom": True}  # overridden
 
 
 def test_image_unsupported_type_raises_TypeError() -> None:
