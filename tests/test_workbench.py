@@ -297,7 +297,7 @@ def test_shutdown_terminates_process() -> None:
     mock_process.communicate.return_value = (b"", b"")
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    with patch("subprocess.run"):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
         wb.shutdown()
     mock_process.communicate.assert_called()
     wb.close()
@@ -312,7 +312,7 @@ def test_shutdown_kills_if_communicate_times_out() -> None:
     ]
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    with patch("subprocess.run"):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
         wb.shutdown()
     mock_process.kill.assert_called_once()
     wb.close()

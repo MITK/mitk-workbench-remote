@@ -288,3 +288,31 @@ class Image:
         if converter is None:
             raise ImportError("MLArrayConverter is not registered")
         return converter.from_image(self)
+
+    def to_mitk(self) -> Any:
+        """Convert to a ``mitk.Image`` (native MITK Python binding).
+
+        Requires the ``mitk`` package. Geometry and pixel data are copied
+        into the native image; properties are **not** transferred by this call
+        (use :meth:`DataNode.get_data` with ``include_properties=True`` or
+        :meth:`DataNode.set_data` with ``include_properties=True`` for metadata
+        round-tripping).
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for to_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+
+        from mitk_workbench_remote.converters import find_converter_for_type
+        import mitk as _mitk
+
+        converter = find_converter_for_type(_mitk.Image)
+        if converter is None:
+            raise ImportError("MitkImageConverter is not registered")
+        return converter.from_image(self)

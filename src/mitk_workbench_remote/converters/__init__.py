@@ -127,3 +127,10 @@ try:
     register_converter(MLArrayConverter())
 except ImportError:
     pass
+
+try:
+    from mitk_workbench_remote.converters._mitk import MitkImageConverter
+
+    register_converter(MitkImageConverter())
+except ImportError:
+    pass

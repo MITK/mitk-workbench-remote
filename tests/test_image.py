@@ -287,3 +287,63 @@ def test_repr_html_escapes_special_characters_in_property_values() -> None:
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "&lt;b&gt;xss&lt;/b&gt;" in html
+
+
+# ---------------------------------------------------------------------------
+# to_mitk -- requires the ``mitk`` package (WP-7)
+# ---------------------------------------------------------------------------
+
+_MITK_OBLIQUE = [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+
+
+class TestToMitk:
+    """Tests for Image.to_mitk() -- all gated on the mitk package."""
+
+    @pytest.fixture(autouse=True)
+    def require_mitk(self) -> None:
+        pytest.importorskip("mitk")
+
+    def _make_image(self) -> Image:
+        arr = np.arange(60, dtype=np.float32).reshape(3, 4, 5)
+        return Image(
+            arr,
+            spacing=(1.0, 2.0, 3.0),
+            origin=(4.0, 5.0, 6.0),
+            direction=np.array(_MITK_OBLIQUE, dtype=np.float64),
+        )
+
+    def test_to_mitk_returns_mitk_image(self) -> None:
+        import mitk
+
+        result = self._make_image().to_mitk()
+        assert isinstance(result, mitk.Image)
+
+    def test_to_mitk_preserves_geometry(self) -> None:
+        result = self._make_image().to_mitk()
+        np.testing.assert_allclose(result.get_spacing(time_step=0), (1.0, 2.0, 3.0), rtol=1e-5)
+        np.testing.assert_allclose(result.get_origin(time_step=0), (4.0, 5.0, 6.0), rtol=1e-5)
+        np.testing.assert_allclose(
+            np.asarray(result.get_direction(time_step=0)),
+            np.array(_MITK_OBLIQUE, dtype=np.float64),
+            atol=1e-10,
+        )
+
+    def test_to_mitk_preserves_pixels(self) -> None:
+        mw_img = self._make_image()
+        result = mw_img.to_mitk()
+        assert np.array_equal(np.asarray(result), mw_img.array)
+
+    def test_to_mitk_raises_importerror_when_mitk_absent(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        mw_img = self._make_image()
+        with patch.dict(sys.modules, {"mitk": None}):
+            with pytest.raises(ImportError, match="mitk"):
+                mw_img.to_mitk()
+
+    def test_to_mitk_does_not_transfer_properties(self) -> None:
+        arr = np.zeros((3, 4, 5), dtype=np.uint8)
+        mw_img = Image(arr, properties={"name": "X"})
+        result = mw_img.to_mitk()
+        assert "name" not in result.property_keys

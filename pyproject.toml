@@ -34,7 +34,8 @@ dependencies = [
 [project.optional-dependencies]
 simpleitk = ["SimpleITK>=2.2"]
 mlarray = ["mlarray>=0.1"]
-all = ["SimpleITK>=2.2", "mlarray>=0.1"]
+mitk = ["mitk"]
+all = ["SimpleITK>=2.2", "mlarray>=0.1", "mitk"]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
@@ -97,6 +98,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "mlarray.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mitk.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import html as _html
+import json
 import logging
 import tempfile
 from enum import Enum
@@ -45,6 +46,52 @@ class PropertyScope(str, Enum):
     ALL = "all"
     NODE = "node"
     DATA = "data"
+
+
+class DataRepresentation(str, Enum):
+    """Return type selection for :meth:`DataNode.get_data`.
+
+    Attributes:
+        AUTO: Return ``mitk.Image`` if the ``mitk`` package is importable,
+            otherwise fall back to :class:`~mitk_workbench_remote.image.Image`.
+        REMOTE: Always return the remote Python type
+            (:class:`~mitk_workbench_remote.image.Image` or
+            :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`).
+        MITK: Always return ``mitk.Image``; raises :exc:`ImportError` if the
+            ``mitk`` package is absent.
+    """
+
+    AUTO = "auto"
+    REMOTE = "remote"
+    MITK = "mitk"
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
+def _apply_remote_properties_to_mitk(mitk_img: Any, props: dict[str, Any]) -> None:
+    """Apply a plain-Python property dict onto a ``mitk.Image``.
+
+    Scalar types (``bool``, ``int``, ``float``, ``str``, ``(r, g, b)`` tuple)
+    are passed directly to ``set_property()`` and auto-wrapped by the binding.
+    Dict-form values (``{"type": "...", "value": ...}``) from the REST API are
+    reconstructed via ``mitk.BaseProperty.from_json()``, which handles every
+    property type that has a self-contained JSON representation.
+
+    Args:
+        mitk_img: A ``mitk.Image`` instance.
+        props: Property dict as returned by
+            :meth:`DataNode.get_properties`.
+    """
+    import mitk
+
+    for key, value in props.items():
+        if isinstance(value, dict) and "type" in value:
+            mitk_img.set_property(key, mitk.BaseProperty.from_json(json.dumps(value)))
+        else:
+            mitk_img.set_property(key, value)
 
 
 # ---------------------------------------------------------------------------
@@ -412,21 +459,40 @@ class DataNode:
             raise UnsupportedDataTypeError(dt)
         return dt
 
-    def get_data(self, *, include_properties: bool = False) -> Any:
+    def get_data(
+        self,
+        *,
+        include_properties: bool = False,
+        as_type: DataRepresentation = DataRepresentation.AUTO,
+    ) -> Any:
         """Download this node's data and return a typed Python object.
 
-        The returned type depends on the node's
-        :attr:`data_type`:
+        The returned type depends on the node's :attr:`data_type` and the
+        ``as_type`` parameter:
 
-        * ``"Image"`` -- returns an :class:`~mitk_workbench_remote.image.Image`
-        * ``"MultiLabelSegmentation"`` -- not yet implemented
+        * ``"Image"`` with ``as_type=AUTO`` -- returns ``mitk.Image`` if the
+          ``mitk`` package is importable, otherwise
+          :class:`~mitk_workbench_remote.image.Image`.
+        * ``"Image"`` with ``as_type=REMOTE`` -- always returns
+          :class:`~mitk_workbench_remote.image.Image`.
+        * ``"Image"`` with ``as_type=MITK`` -- always returns ``mitk.Image``;
+          raises :exc:`ImportError` if the ``mitk`` package is absent.
+        * ``"MultiLabelSegmentation"`` -- always returns
+          :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`;
+          ``as_type=MITK`` raises :exc:`NotImplementedError` (see WP-11).
 
         The transfer mode (direct or file-reference) is negotiated automatically
         based on the transport's :attr:`~RestTransport.transfer_mode`.
 
         Args:
             include_properties: If ``True``, also fetch data-scope properties
-                and store them in the returned object's properties.
+                and store them in the returned object's properties.  For
+                ``mitk.Image`` results, scalar properties (str/bool/int/float/
+                3-tuple) are applied via ``mitk.Image.set_property``; exotic
+                types that cannot be auto-wrapped are logged at WARNING and
+                skipped.
+            as_type: Controls the Python type of the returned image object.
+                Defaults to :attr:`DataRepresentation.AUTO`.
 
         Returns:
             A typed Python object matching the node's data type.
@@ -434,6 +500,10 @@ class DataNode:
         Raises:
             UnsupportedDataTypeError: If the data type cannot be represented
                 in Python. Use :meth:`save_data` to download raw bytes instead.
+            ImportError: If ``as_type=MITK`` and the ``mitk`` package is
+                not installed.
+            NotImplementedError: If ``as_type=MITK`` and the data type is
+                ``MultiLabelSegmentation`` (requires WP-11).
         """
         dt = self._check_data_type_supported()
         _log.info(
@@ -446,22 +516,66 @@ class DataNode:
         nrrd_source = self._download_raw_source()
 
         if dt == "MultiLabelSegmentation":
-            return self._get_data_multilabel(nrrd_source, include_properties=include_properties)
+            return self._get_data_multilabel(
+                nrrd_source,
+                include_properties=include_properties,
+                as_type=as_type,
+            )
         if dt == "Image":
-            return self._get_data_image(nrrd_source, include_properties=include_properties)
+            return self._get_data_image(
+                nrrd_source,
+                include_properties=include_properties,
+                as_type=as_type,
+            )
         # Unreachable after _check_data_type_supported, but explicit.
         raise UnsupportedDataTypeError(dt)
 
-    def _get_data_image(self, nrrd_source: bytes | str, *, include_properties: bool) -> Any:
+    def _get_data_image(
+        self,
+        nrrd_source: bytes | str,
+        *,
+        include_properties: bool,
+        as_type: DataRepresentation,
+    ) -> Any:
         """Deserialize NRRD data into an Image."""
         image = _io.read_nrrd(nrrd_source)
         if include_properties:
-            props = self.get_properties(scope=PropertyScope.DATA)
-            image._properties = props
-        return image
+            image._properties = self.get_properties(scope=PropertyScope.DATA)
 
-    def _get_data_multilabel(self, nrrd_source: bytes | str, *, include_properties: bool) -> Any:
+        if as_type == DataRepresentation.REMOTE:
+            return image
+
+        if as_type == DataRepresentation.MITK:
+            mitk_img = image.to_mitk()  # raises ImportError if mitk absent
+            if include_properties:
+                _apply_remote_properties_to_mitk(mitk_img, image._properties)
+            return mitk_img
+
+        # AUTO: try mitk, fall back to remote image on ImportError
+        try:
+            mitk_img = image.to_mitk()
+        except ImportError:
+            return image
+        if include_properties:
+            _apply_remote_properties_to_mitk(mitk_img, image._properties)
+        return mitk_img
+
+    def _get_data_multilabel(
+        self,
+        nrrd_source: bytes | str,
+        *,
+        include_properties: bool,
+        as_type: DataRepresentation,
+    ) -> Any:
         """Deserialize NRRD data into a MultiLabelSegmentation."""
+        if as_type == DataRepresentation.MITK:
+            raise NotImplementedError(
+                "as_type=MITK for MultiLabelSegmentation requires WP-11 "
+                "(mitk.MultiLabelSegmentation binding + MitkSegmentationConverter). "
+                "See MITK_Interoperability_Design.md §WP-11."
+            )
+        # TODO(WP-11): when mitk.MultiLabelSegmentation is available, AUTO should
+        # resolve to it here (same pattern as _get_data_image).
         seg = _io.read_multilabel_nrrd(nrrd_source)
         if include_properties:
             seg._properties = self.get_properties(scope=PropertyScope.DATA)

@@ -270,6 +270,10 @@ class MultiLabelSegmentation:
         ValueError: On shape/geometry inconsistency or duplicate/missing label IDs.
     """
 
+    # TODO(WP-11): Add to_mitk() once mitk.MultiLabelSegmentation is wrapped and
+    # MitkSegmentationConverter is implemented. The C++ side already has
+    # InitMultiLabelSegmentation (Module.cpp:31). See MITK_Interoperability_Design.md §WP-11.
+
     UNLABELED_VALUE: int = 0
 
     def __init__(
