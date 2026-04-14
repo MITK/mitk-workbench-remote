@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 import nrrd
 import numpy as np
 
-from mitk_workbench_remote._io.nrrd import _MITK_SPACE, _extract_spatial
+from mitk_workbench_remote._io.nrrd import _INDEX_ORDER, _MITK_SPACE, _extract_spatial
 
 _log = logging.getLogger(__name__)
 
@@ -104,9 +104,9 @@ def read_multilabel_nrrd_raw(
     if isinstance(source, bytes):
         buf = io.BytesIO(source)
         header = nrrd.read_header(buf)
-        data = nrrd.read_data(header, buf, None)
+        data = nrrd.read_data(header, buf, None, index_order=_INDEX_ORDER)
     else:
-        data, header = nrrd.read(str(source))
+        data, header = nrrd.read(str(source), index_order=_INDEX_ORDER)
 
     # Determine spatial ndim (excluding vector axis)
     kinds = header.get("kinds", [])
@@ -179,11 +179,11 @@ def write_multilabel_nrrd_raw(
             header[key] = value
 
     if path is not None:
-        nrrd.write(str(path), data, header)
+        nrrd.write(str(path), data, header, index_order=_INDEX_ORDER)
         return Path(path).read_bytes()
 
     buf = io.BytesIO()
-    nrrd.write(buf, data, header)
+    nrrd.write(buf, data, header, index_order=_INDEX_ORDER)
     return buf.getvalue()
 
 
