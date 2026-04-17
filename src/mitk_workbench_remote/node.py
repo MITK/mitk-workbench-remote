@@ -94,6 +94,47 @@ def _apply_remote_properties_to_mitk(mitk_img: Any, props: dict[str, Any]) -> No
             mitk_img.set_property(key, value)
 
 
+def _nrrd_source_to_mitk(nrrd_source: bytes | str, mitk_type_name: str) -> Any:
+    """Load NRRD data via ``mitk.IOUtil.load()`` and return the first matching object.
+
+    This is the authoritative download path when the caller wants a native mitk
+    object.  It bypasses the intermediate mw layer entirely: the C++ IOUtil
+    parser is used directly, which is the source of truth for MITK types.
+
+    Args:
+        nrrd_source: NRRD data as bytes or a file path string.  When bytes are
+            given they are written to a temporary file and deleted afterwards.
+        mitk_type_name: Name of the ``mitk`` attribute to look for among the
+            loaded objects (e.g. ``"Image"``, ``"MultiLabelSegmentation"``).
+
+    Raises:
+        ImportError: If the ``mitk`` package is not installed.
+        TransferError: If ``IOUtil.load()`` returns no object of the requested
+            type.
+    """
+    import mitk
+
+    target_type = getattr(mitk, mitk_type_name)
+
+    if isinstance(nrrd_source, str):
+        results = list(mitk.IOUtil.load(nrrd_source))
+    else:
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".nrrd", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            tmp_path.write_bytes(nrrd_source)
+            results = list(mitk.IOUtil.load(str(tmp_path)))
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+
+    for obj in results:
+        if isinstance(obj, target_type):
+            return obj
+    raise TransferError(f"mitk.IOUtil.load() returned no {mitk_type_name} for the given NRRD data")
+
+
 # ---------------------------------------------------------------------------
 # DataNode
 # ---------------------------------------------------------------------------
@@ -477,9 +518,14 @@ class DataNode:
           :class:`~mitk_workbench_remote.image.Image`.
         * ``"Image"`` with ``as_type=MITK`` -- always returns ``mitk.Image``;
           raises :exc:`ImportError` if the ``mitk`` package is absent.
-        * ``"MultiLabelSegmentation"`` -- always returns
-          :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`;
-          ``as_type=MITK`` raises :exc:`NotImplementedError` (see WP-11).
+        * ``"MultiLabelSegmentation"`` with ``as_type=AUTO`` -- returns
+          ``mitk.MultiLabelSegmentation`` if the ``mitk`` package is importable,
+          otherwise :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`.
+        * ``"MultiLabelSegmentation"`` with ``as_type=REMOTE`` -- always returns
+          :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`.
+        * ``"MultiLabelSegmentation"`` with ``as_type=MITK`` -- always returns
+          ``mitk.MultiLabelSegmentation``; raises :exc:`ImportError` if the
+          ``mitk`` package is absent.
 
         The transfer mode (direct or file-reference) is negotiated automatically
         based on the transport's :attr:`~RestTransport.transfer_mode`.
@@ -502,8 +548,6 @@ class DataNode:
                 in Python. Use :meth:`save_data` to download raw bytes instead.
             ImportError: If ``as_type=MITK`` and the ``mitk`` package is
                 not installed.
-            NotImplementedError: If ``as_type=MITK`` and the data type is
-                ``MultiLabelSegmentation`` (requires WP-11).
         """
         dt = self._check_data_type_supported()
         _log.info(
@@ -538,27 +582,36 @@ class DataNode:
         as_type: DataRepresentation,
     ) -> Any:
         """Deserialize NRRD data into an Image."""
-        image = _io.read_nrrd(nrrd_source)
-        if include_properties:
-            image._properties = self.get_properties(scope=PropertyScope.DATA)
-
         if as_type == DataRepresentation.REMOTE:
+            image = _io.read_nrrd(nrrd_source)
+            if include_properties:
+                image._properties = self.get_properties(scope=PropertyScope.DATA)
             return image
 
         if as_type == DataRepresentation.MITK:
-            mitk_img = image.to_mitk()  # raises ImportError if mitk absent
+            # Load directly via C++ IOUtil — authoritative path, no intermediate mw object.
+            mitk_img = _nrrd_source_to_mitk(
+                nrrd_source, "Image"
+            )  # raises ImportError if mitk absent
             if include_properties:
-                _apply_remote_properties_to_mitk(mitk_img, image._properties)
+                _apply_remote_properties_to_mitk(
+                    mitk_img, self.get_properties(scope=PropertyScope.DATA)
+                )
             return mitk_img
 
-        # AUTO: try mitk, fall back to remote image on ImportError
+        # AUTO: try direct IOUtil path first; fall back to mw.Image if mitk is absent.
         try:
-            mitk_img = image.to_mitk()
+            mitk_img = _nrrd_source_to_mitk(nrrd_source, "Image")
+            if include_properties:
+                _apply_remote_properties_to_mitk(
+                    mitk_img, self.get_properties(scope=PropertyScope.DATA)
+                )
+            return mitk_img
         except ImportError:
+            image = _io.read_nrrd(nrrd_source)
+            if include_properties:
+                image._properties = self.get_properties(scope=PropertyScope.DATA)
             return image
-        if include_properties:
-            _apply_remote_properties_to_mitk(mitk_img, image._properties)
-        return mitk_img
 
     def _get_data_multilabel(
         self,
@@ -568,18 +621,36 @@ class DataNode:
         as_type: DataRepresentation,
     ) -> Any:
         """Deserialize NRRD data into a MultiLabelSegmentation."""
+        if as_type == DataRepresentation.REMOTE:
+            seg = _io.read_multilabel_nrrd(nrrd_source)
+            if include_properties:
+                seg._properties = self.get_properties(scope=PropertyScope.DATA)
+            return seg
+
         if as_type == DataRepresentation.MITK:
-            raise NotImplementedError(
-                "as_type=MITK for MultiLabelSegmentation requires WP-11 "
-                "(mitk.MultiLabelSegmentation binding + MitkSegmentationConverter). "
-                "See MITK_Interoperability_Design.md §WP-11."
-            )
-        # TODO(WP-11): when mitk.MultiLabelSegmentation is available, AUTO should
-        # resolve to it here (same pattern as _get_data_image).
-        seg = _io.read_multilabel_nrrd(nrrd_source)
-        if include_properties:
-            seg._properties = self.get_properties(scope=PropertyScope.DATA)
-        return seg
+            # Load directly via C++ IOUtil — authoritative path, no intermediate mw object.
+            mitk_seg = _nrrd_source_to_mitk(
+                nrrd_source, "MultiLabelSegmentation"
+            )  # raises ImportError if mitk absent
+            if include_properties:
+                _apply_remote_properties_to_mitk(
+                    mitk_seg, self.get_properties(scope=PropertyScope.DATA)
+                )
+            return mitk_seg
+
+        # AUTO: try direct IOUtil path first; fall back to mw.MultiLabelSegmentation if mitk absent.
+        try:
+            mitk_seg = _nrrd_source_to_mitk(nrrd_source, "MultiLabelSegmentation")
+            if include_properties:
+                _apply_remote_properties_to_mitk(
+                    mitk_seg, self.get_properties(scope=PropertyScope.DATA)
+                )
+            return mitk_seg
+        except ImportError:
+            seg = _io.read_multilabel_nrrd(nrrd_source)
+            if include_properties:
+                seg._properties = self.get_properties(scope=PropertyScope.DATA)
+            return seg
 
     def _download_raw_source(self) -> bytes | str:
         """Download raw data and return bytes or a file path.
@@ -630,17 +701,30 @@ class DataNode:
 
         Accepts an :class:`~mitk_workbench_remote.image.Image`, a numpy
         ndarray, or any type handled by the converter registry (e.g.
-        SimpleITK.Image, mlarray.MLArray). The transfer mode is chosen
+        ``SimpleITK.Image``, ``mlarray.MLArray``, ``mitk.Image``,
+        ``mitk.MultiLabelSegmentation``). The transfer mode is chosen
         automatically.
 
         After a successful upload, :attr:`data_type` is updated locally to
         reflect the uploaded type without requiring an explicit
         :meth:`refresh` call.
 
+        **Property behavior for** ``mitk.*`` **types:** When ``data`` is a
+        ``mitk.Image`` or ``mitk.MultiLabelSegmentation``, MITK's NRRD
+        serialization embeds the full C++ property list in the uploaded bytes.
+        Data-scope properties are therefore **always** transferred, regardless
+        of ``include_properties``.  This differs from
+        :class:`~mitk_workbench_remote.image.Image` and
+        :class:`~mitk_workbench_remote.multilabel.MultiLabelSegmentation`
+        where ``include_properties=False`` (the default) leaves existing
+        server-side properties untouched.
+
         Args:
             data: Pixel data or a convertible object.
             include_properties: If ``True``, also upload the data's properties
-                as data-scope properties.
+                as data-scope properties.  Has no additional effect for
+                ``mitk.Image`` or ``mitk.MultiLabelSegmentation`` because
+                properties are already embedded in the NRRD bytes.
 
         Raises:
             UnsupportedDataTypeError: If the node's data type does not match
@@ -700,7 +784,20 @@ class DataNode:
         elif isinstance(data, _Image):
             self._data_type = "Image"
         else:
-            self.refresh()
+            # Check for mitk.MultiLabelSegmentation before falling back to refresh().
+            # mitk.Image is already handled by find_image_converter in _resolve_serialized_bytes,
+            # so data_type for mitk.Image is determined by the server via refresh().
+            _is_mitk_mls = False
+            try:
+                import mitk
+
+                _is_mitk_mls = isinstance(data, mitk.MultiLabelSegmentation)
+            except ImportError:
+                pass
+            if _is_mitk_mls:
+                self._data_type = "MultiLabelSegmentation"
+            else:
+                self.refresh()
 
         if include_properties:
             from mitk_workbench_remote.converters import find_image_converter
@@ -735,6 +832,31 @@ class DataNode:
         image_converter = find_image_converter(data)
         if image_converter is not None:
             return image_converter.to_nrrd_bytes(data)
+
+        # Check for mitk.MultiLabelSegmentation (not matched by image converters
+        # because MLS does not inherit from mitk.Image — they are siblings
+        # under SlicedData).
+        try:
+            import mitk
+
+            if isinstance(data, mitk.MultiLabelSegmentation):
+                tmp_path: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".nrrd", delete=False) as tmp:
+                        tmp_path = Path(tmp.name)
+                    # MITK resolves the MultiLabelSegmentation writer via a
+                    # MIME type whose AppliesTo() inspects the file header when
+                    # the path exists. Remove the empty placeholder so writer
+                    # selection does not reject based on an empty modality.
+                    tmp_path.unlink()
+                    data.save(str(tmp_path))
+                    return tmp_path.read_bytes()
+                finally:
+                    if tmp_path is not None:
+                        tmp_path.unlink(missing_ok=True)
+        except ImportError:
+            pass
+
         raise TypeError(f"No converter found for {type(data).__name__}")
 
     def _resolve_temp_dir(self) -> str:

@@ -270,10 +270,6 @@ class MultiLabelSegmentation:
         ValueError: On shape/geometry inconsistency or duplicate/missing label IDs.
     """
 
-    # TODO(WP-11): Add to_mitk() once mitk.MultiLabelSegmentation is wrapped and
-    # MitkSegmentationConverter is implemented. The C++ side already has
-    # InitMultiLabelSegmentation (Module.cpp:31). See MITK_Interoperability_Design.md §WP-11.
-
     UNLABELED_VALUE: int = 0
 
     def __init__(
@@ -476,6 +472,68 @@ class MultiLabelSegmentation:
             KeyError: If the key does not exist.
         """
         del self._properties[key]
+
+    # ------------------------------------------------------------------
+    # MITK interop
+    # ------------------------------------------------------------------
+
+    def to_mitk(self) -> Any:
+        """Convert to a ``mitk.MultiLabelSegmentation`` (native MITK Python binding).
+
+        Requires the ``mitk`` package, which is typically only available inside
+        a MITK-provided Python environment. Geometry, pixel data, and all label
+        metadata (groups, labels, colors, lock state, etc.) are transferred via
+        NRRD round-trip.
+
+        Note: data-scope properties stored in :attr:`properties` are **not**
+        transferred, because the remote library's NRRD writer does not embed
+        arbitrary properties. For a full round-trip including data-scope
+        properties, use :meth:`DataNode.get_data` /
+        :meth:`DataNode.set_data` with ``as_type=DataRepresentation.MITK``.
+
+        Returns:
+            A ``mitk.MultiLabelSegmentation`` instance.
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for to_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+        from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
+
+        return MitkSegmentationConverter().from_segmentation(self)
+
+    @classmethod
+    def from_mitk(cls, mitk_seg: Any) -> MultiLabelSegmentation:
+        """Create from a ``mitk.MultiLabelSegmentation`` (native MITK Python binding).
+
+        Geometry, pixel data, and all label metadata are transferred via NRRD
+        round-trip.
+
+        Args:
+            mitk_seg: A native MITK MultiLabelSegmentation object.
+
+        Returns:
+            A new :class:`MultiLabelSegmentation` instance.
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for from_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+        from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
+
+        return MitkSegmentationConverter().to_segmentation(mitk_seg)
 
     # ------------------------------------------------------------------
     # Lookup
