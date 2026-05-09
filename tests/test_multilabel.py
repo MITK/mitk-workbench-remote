@@ -375,6 +375,22 @@ def test_get_group_labels() -> None:
     assert names == {"A", "B"}
 
 
+def test_labels_property_raises_on_label_with_none_value() -> None:
+    # ``add_label`` always assigns a value before storing, so a label with
+    # ``value=None`` in ``_labels`` is internal-state corruption. The sort
+    # accessor must surface that loudly rather than aliasing it onto the
+    # reserved UNLABELED_VALUE (0).
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    # Force the corrupt state by mutating an entry's underlying value back
+    # to None. Public API never lets this happen, but the sort accessor must
+    # still fail loudly if it does.
+    next(iter(seg._labels.values()))._value = None  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="value=None"):
+        _ = seg.labels
+
+
 # ===========================================================================
 # get_group_image
 # ===========================================================================
@@ -732,12 +748,10 @@ class TestMitkInterop:
         from unittest.mock import patch
 
         seg = self._make_seg()
-        with patch.dict(sys.modules, {"mitk": None}):
-            with pytest.raises(ImportError, match="mitk"):
-                seg.to_mitk()
+        with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError, match="mitk"):
+            seg.to_mitk()
 
     def test_from_mitk_returns_mw_mls(self) -> None:
-        import mitk
 
         seg = self._make_seg()
         mitk_seg = seg.to_mitk()
@@ -761,10 +775,7 @@ class TestMitkInterop:
         import sys
         from unittest.mock import patch
 
-        import mitk
-
         seg = self._make_seg()
         mitk_seg = seg.to_mitk()
-        with patch.dict(sys.modules, {"mitk": None}):
-            with pytest.raises(ImportError, match="mitk"):
-                MultiLabelSegmentation.from_mitk(mitk_seg)
+        with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError, match="mitk"):
+            MultiLabelSegmentation.from_mitk(mitk_seg)

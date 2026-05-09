@@ -22,6 +22,8 @@ import numpy as np
 import pytest
 
 from mitk_workbench_remote._io.multilabel_nrrd import read_multilabel_nrrd, write_multilabel_nrrd
+from mitk_workbench_remote._io.nrrd import read_nrrd, write_nrrd
+from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, MultiLabelSegmentation
 
 
@@ -191,3 +193,49 @@ def test_roundtrip_multiple_groups_pixel_data() -> None:
 
     assert seg2.get_group_image(0).array[0, 0, 0] == 1
     assert seg2.get_group_image(1).array[2, 2, 2] == 2
+
+
+def test_seg_and_image_align_in_world_space_after_io_roundtrip() -> None:
+    """A label and an image voxel placed at the same numpy index must
+    end up at the same world position after both go through their
+    respective NRRD I/O paths.
+
+    Regression for the F-order vs C-order multilabel-NRRD axis-order
+    bug. Prior to the fix, MultiLabelSegmentation per-group arrays were
+    written with their spatial axes transposed relative to Image, so
+    the seg's NRRD described a different physical volume from the
+    image's NRRD whenever the spatial dims were not all equal. This
+    test uses a non-cubic anisotropic shape so any such mismatch
+    surfaces.
+    """
+    # Three distinct spatial sizes so axis swaps cannot hide.
+    img_arr = np.zeros((4, 5, 6), dtype=np.float32)
+    img_arr[1, 2, 3] = 999.0  # voxel at numpy index (k=1, j=2, i=3)
+    spacing = (0.5, 1.0, 2.0)  # (sx, sy, sz)
+    img = Image(img_arr, spacing=spacing, origin=(0.0, 0.0, 0.0))
+
+    seg = MultiLabelSegmentation.create(reference=img, dtype=LABEL_DTYPE)
+    seg.add_label(Label(1, "spot", color=(1.0, 0.0, 0.0)), group=seg.add_group("G"))
+    seg_arr = np.zeros(img.shape, dtype=LABEL_DTYPE)
+    seg_arr[1, 2, 3] = 1  # SAME numpy index as the image voxel
+    seg.set_group_image(0, seg_arr)
+
+    # Round-trip both through their respective NRRD writers/readers.
+    img_back = read_nrrd(write_nrrd(img))
+    seg_back = read_multilabel_nrrd(write_multilabel_nrrd(seg))
+
+    # In-memory shape and spacing must remain Image-compatible after
+    # round-trip (this alone catches the F-order axis-swap bug).
+    assert img_back.array.shape == img.array.shape
+    assert seg_back.get_group_image(0).array.shape == img.array.shape
+    assert img_back.spacing == img.spacing
+    assert seg_back.spacing == img.spacing
+
+    # The label voxel must round-trip to the SAME numpy index as the
+    # image voxel: same physical position in world space.
+    assert seg_back.get_group_image(0).array[1, 2, 3] == 1
+    assert img_back.array[1, 2, 3] == 999.0
+    # And asymmetric coords -- arr[1, 2, 3] must NOT equal arr[3, 2, 1]
+    # under either round-trip; an axis swap would silently make them so.
+    assert seg_back.get_group_image(0).array[3, 2, 1] == 0
+    assert img_back.array[3, 2, 1] == 0.0

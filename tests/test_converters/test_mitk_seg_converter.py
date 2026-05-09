@@ -27,9 +27,13 @@ import pytest
 
 mitk = pytest.importorskip("mitk")
 
-from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
-from mitk_workbench_remote.multilabel import Label, LabelGroup, MultiLabelSegmentation
-
+from mitk_workbench_remote.converters._mitk_seg import (  # noqa: E402  -- requires `mitk`
+    MitkSegmentationConverter,
+)
+from mitk_workbench_remote.multilabel import (  # noqa: E402  -- requires `mitk`
+    Label,
+    MultiLabelSegmentation,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
