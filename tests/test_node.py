@@ -1241,9 +1241,8 @@ def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
         content_type="application/octet-stream",
     )
 
-    with patch.dict(sys.modules, {"mitk": None}):
-        with pytest.raises(ImportError):
-            node.get_data(as_type=DataRepresentation.MITK)
+    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
+        node.get_data(as_type=DataRepresentation.MITK)
 
 
 @responses.activate
@@ -1318,9 +1317,8 @@ def test_get_data_multilabel_mitk_raises_when_mitk_absent() -> None:
         status=200,
         content_type="application/octet-stream",
     )
-    with patch.dict(sys.modules, {"mitk": None}):
-        with pytest.raises(ImportError):
-            node.get_data(as_type=DataRepresentation.MITK)
+    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
+        node.get_data(as_type=DataRepresentation.MITK)
 
 
 # ---------------------------------------------------------------------------
