@@ -113,7 +113,7 @@ class MitkImageConverter:
 
         img: _Image = image
         direction = np.asarray(img.direction, dtype=np.float64)
-        return mitk.Image.from_numpy(  # type: ignore[no-any-return]
+        return mitk.Image.from_numpy(
             img.array,
             spacing=img.spacing,
             origin=img.origin,

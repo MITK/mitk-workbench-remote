@@ -309,8 +309,9 @@ class Image:
                 "It is available when using MITK's Python environment."
             ) from None
 
-        from mitk_workbench_remote.converters import find_converter_for_type
         import mitk as _mitk
+
+        from mitk_workbench_remote.converters import find_converter_for_type
 
         converter = find_converter_for_type(_mitk.Image)
         if converter is None:

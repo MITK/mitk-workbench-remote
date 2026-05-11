@@ -338,9 +338,11 @@ class TestToMitk:
         from unittest.mock import patch
 
         mw_img = self._make_image()
-        with patch.dict(sys.modules, {"mitk": None}):
-            with pytest.raises(ImportError, match="mitk"):
-                mw_img.to_mitk()
+        with (
+            patch.dict(sys.modules, {"mitk": None}),
+            pytest.raises(ImportError, match="mitk"),
+        ):
+            mw_img.to_mitk()
 
     def test_to_mitk_does_not_transfer_properties(self) -> None:
         arr = np.zeros((3, 4, 5), dtype=np.uint8)

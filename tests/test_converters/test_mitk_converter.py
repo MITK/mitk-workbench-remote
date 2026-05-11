@@ -23,13 +23,14 @@ import pytest
 
 mitk = pytest.importorskip("mitk")
 
-from mitk_workbench_remote.converters import find_converter_for_type, find_image_converter
-from mitk_workbench_remote.converters._mitk import MitkImageConverter
-from mitk_workbench_remote.image import Image
-
-_OBLIQUE = np.array(
-    [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64
+from mitk_workbench_remote.converters import (  # noqa: E402
+    find_converter_for_type,
+    find_image_converter,
 )
+from mitk_workbench_remote.converters._mitk import MitkImageConverter  # noqa: E402
+from mitk_workbench_remote.image import Image  # noqa: E402
+
+_OBLIQUE = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
 def _make_3d_mitk_image() -> "mitk.Image":
@@ -181,9 +182,7 @@ def test_to_nrrd_bytes_cleans_up_tempfile(tmp_path: pytest.TempPathFactory) -> N
         captured_path.append(Path(ctx.name))
         return ctx
 
-    with patch.object(
-        tempfile, "NamedTemporaryFile", side_effect=tracking_ntf
-    ):
+    with patch.object(tempfile, "NamedTemporaryFile", side_effect=tracking_ntf):
         converter.to_nrrd_bytes(img)
 
     assert captured_path, "NamedTemporaryFile was never called"

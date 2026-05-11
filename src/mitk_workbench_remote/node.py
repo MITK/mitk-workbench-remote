@@ -379,14 +379,16 @@ class DataNode:
     def children(self) -> list[DataNode]:
         """Child nodes of this node. Always fetches from the server."""
         params: dict[str, str | int] = {"limit": 1000, "offset": 0}
+        offset = 0
         nodes: list[DataNode] = []
         while True:
             resp = self._transport.get(f"/datastorage/nodes/{self._uid}/children", params=params)
             body = resp.json()
             nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
-            params["offset"] = int(params["offset"]) + len(body["data"])
-            if params["offset"] >= total_count:
+            offset += len(body["data"])
+            params["offset"] = offset
+            if offset >= total_count:
                 break
         return nodes
 

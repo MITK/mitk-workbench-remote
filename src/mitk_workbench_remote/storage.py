@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import builtins
 import html as _html
 import json
 import logging
@@ -89,6 +90,7 @@ class DataStorage:
             toplevel,
         )
         params: dict[str, str | int] = {"limit": 1000, "offset": 0}
+        offset = 0
         if data_type is not None:
             params["data_type"] = data_type
         if toplevel:
@@ -100,8 +102,9 @@ class DataStorage:
             body = resp.json()
             nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
-            params["offset"] = int(params["offset"]) + len(body["data"])
-            if params["offset"] >= total_count:
+            offset += len(body["data"])
+            params["offset"] = offset
+            if offset >= total_count:
                 break
         _log.debug("[%s] list -> %d node(s)", self._transport.base_url, len(nodes))
         return nodes
@@ -115,7 +118,7 @@ class DataStorage:
         properties: dict[str, Any] | None = None,
         scope: PropertyScope = PropertyScope.ALL,
         context: str | None = None,
-    ) -> list[DataNode]:
+    ) -> builtins.list[DataNode]:
         """Return nodes matching the given filters.
 
         Args:
@@ -139,6 +142,7 @@ class DataStorage:
             List of :class:`~mitk_workbench_remote.node.DataNode` objects.
         """
         params: dict[str, str | int] = {"limit": 1000, "offset": 0}
+        offset = 0
         if data_type is not None:
             params["data_type"] = data_type
         if toplevel:
@@ -158,8 +162,9 @@ class DataStorage:
             body = resp.json()
             nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
-            params["offset"] = int(params["offset"]) + len(body["data"])
-            if params["offset"] >= total_count:
+            offset += len(body["data"])
+            params["offset"] = offset
+            if offset >= total_count:
                 break
         return nodes
 

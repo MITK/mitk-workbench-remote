@@ -1238,16 +1238,18 @@ def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
         content_type="application/octet-stream",
     )
 
-    with patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")):
-        with pytest.raises(ImportError):
-            node.get_data(as_type=DataRepresentation.MITK)
+    with (
+        patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")),
+        pytest.raises(ImportError),
+    ):
+        node.get_data(as_type=DataRepresentation.MITK)
 
 
 @responses.activate
 def test_get_data_multilabel_mitk_raises_notimplementederror() -> None:
     """as_type=MITK for MultiLabelSegmentation raises NotImplementedError (WP-11 fence)."""
     from mitk_workbench_remote._io import write_multilabel_nrrd
-    from mitk_workbench_remote.multilabel import Label, LabelGroup, MultiLabelSegmentation
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
 
     node = _make_direct_node(data_type="MultiLabelSegmentation")
     seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))

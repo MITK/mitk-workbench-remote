@@ -238,6 +238,8 @@ def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[LabelGroup, list[Label]]:
         if label_dict.get("value", 0) == 0:
             continue  # skip UNLABELED_VALUE
         label = _label_from_dict(label_dict)
+        if label.value is None:
+            raise ValueError("Label loaded from NRRD has no value assigned")
         group._label_ids.append(label.value)
         labels.append(label)
     return group, labels
@@ -320,6 +322,8 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
         group, group_labels = _labelgroup_from_dict(group_dict)
         groups.append(group)
         for label in group_labels:
+            # _labelgroup_from_dict guarantees label.value is not None.
+            assert label.value is not None
             labels_dict[label.value] = label
         group_images.append(
             Image(
