@@ -106,7 +106,7 @@ def test_image_from_converter_lazy_array() -> None:
     mock_converter = MagicMock()
     mock_converter.can_handle.return_value = True
     mock_converter.extract_geometry.return_value = {"spacing": (1.0, 1.0, 1.0)}
-    mock_converter.extract_metadata.return_value = {}
+    mock_converter.extract_properties.return_value = {}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(
@@ -125,7 +125,7 @@ def test_image_from_converter_extracts_geometry() -> None:
         "spacing": (0.5, 1.0, 2.0),
         "origin": (10.0, 20.0, 30.0),
     }
-    mock_converter.extract_metadata.return_value = {"my_key": "my_value"}
+    mock_converter.extract_properties.return_value = {"my_key": "my_value"}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(
@@ -144,7 +144,7 @@ def test_image_explicit_kwargs_override_converter_geometry() -> None:
         "spacing": (0.5, 1.0, 2.0),
         "origin": (10.0, 20.0, 30.0),
     }
-    mock_converter.extract_metadata.return_value = {"extracted": True}
+    mock_converter.extract_properties.return_value = {"extracted": True}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(

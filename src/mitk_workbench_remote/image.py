@@ -78,7 +78,7 @@ class Image:
             self._source_data = data
             self._converter = converter
             geo_defaults = converter.extract_geometry(data)
-            properties_defaults = converter.extract_metadata(data)
+            properties_defaults = converter.extract_properties(data)
             # Need ndim: try to get from geometry, else materialize array
             if "spacing" in geo_defaults:
                 ndim = len(geo_defaults["spacing"])

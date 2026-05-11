@@ -54,12 +54,12 @@ class SitkConverter:
             "direction": direction,
         }
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         img: Any = obj
-        metadata: dict[str, Any] = {}
+        properties: dict[str, Any] = {}
         for key in img.GetMetaDataKeys():
-            metadata[key] = img.GetMetaData(key)
-        return metadata
+            properties[key] = img.GetMetaData(key)
+        return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
         return sitk.GetArrayFromImage(obj)

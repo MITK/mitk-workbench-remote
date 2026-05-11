@@ -77,9 +77,9 @@ class MitkImageConverter:
             "direction": direction,
         }
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         img: mitk.Image = obj
-        metadata: dict[str, Any] = {}
+        properties: dict[str, Any] = {}
         for key in img.property_keys:
             val = img.get_property(key)  # raw=False: returns coerced Python value
             if val is None:
@@ -87,10 +87,10 @@ class MitkImageConverter:
             if isinstance(val, mitk.BaseProperty):
                 # Unknown type -- no native Python equivalent.
                 # to_json() is guaranteed on every BaseProperty subclass.
-                metadata[key] = json.loads(val.to_json())
+                properties[key] = json.loads(val.to_json())
             else:
-                metadata[key] = val
-        return metadata
+                properties[key] = val
+        return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
         img: mitk.Image = obj

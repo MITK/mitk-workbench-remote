@@ -715,7 +715,7 @@ class DataNode:
             else:
                 converter = find_image_converter(data)
                 if converter is not None:
-                    properties = converter.extract_metadata(data)
+                    properties = converter.extract_properties(data)
             if properties:
                 self.update_properties(scope=PropertyScope.DATA, **properties)
 
