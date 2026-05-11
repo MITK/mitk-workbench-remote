@@ -11,6 +11,8 @@ cache:
 
 .python-base:
   image: python:${PYTHON_VERSION}
+  tags:
+    - sci-runner
   before_script:
     - pip install -e ".[dev]"
 
