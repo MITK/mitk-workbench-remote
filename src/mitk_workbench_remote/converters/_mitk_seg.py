@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mitk_workbench_remote.multilabel import MultiLabelSegmentation
 
 
 class MitkSegmentationConverter:
@@ -77,7 +80,7 @@ class MitkSegmentationConverter:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
 
-    def to_segmentation(self, mitk_seg: Any) -> Any:
+    def to_segmentation(self, mitk_seg: Any) -> MultiLabelSegmentation:
         """Convert a ``mitk.MultiLabelSegmentation`` to an ``mw.MultiLabelSegmentation``.
 
         Serializes the mitk object to NRRD via ``mitk.IOUtil.save()`` (C++

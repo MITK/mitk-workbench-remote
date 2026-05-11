@@ -648,7 +648,8 @@ class DataNode:
                 )
             return mitk_seg
 
-        # AUTO: try direct IOUtil path first; fall back to mw.MultiLabelSegmentation if mitk absent.
+        # AUTO: try direct IOUtil path first; fall back to mw.MultiLabelSegmentation if
+        # mitk absent.
         try:
             mitk_seg = _nrrd_source_to_mitk(nrrd_source, "MultiLabelSegmentation")
             if include_properties:

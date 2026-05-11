@@ -42,11 +42,11 @@ class SitkConverter:
 
     def extract_geometry(self, obj: Any) -> dict[str, Any]:
         img: Any = obj
-        ndim = img.GetDimension()  # type: ignore[no-untyped-call]
-        spacing = img.GetSpacing()  # type: ignore[no-untyped-call]
-        origin = img.GetOrigin()  # type: ignore[no-untyped-call]
+        ndim = img.GetDimension()
+        spacing = img.GetSpacing()
+        origin = img.GetOrigin()
         # SimpleITK direction is a flat tuple of ndim*ndim elements
-        direction_flat = img.GetDirection()  # type: ignore[no-untyped-call]
+        direction_flat = img.GetDirection()
         direction = np.array(direction_flat, dtype=np.float64).reshape(ndim, ndim)
         return {
             "spacing": tuple(spacing),
@@ -57,8 +57,8 @@ class SitkConverter:
     def extract_properties(self, obj: Any) -> dict[str, Any]:
         img: Any = obj
         properties: dict[str, Any] = {}
-        for key in img.GetMetaDataKeys():  # type: ignore[no-untyped-call]
-            properties[key] = img.GetMetaData(key)  # type: ignore[no-untyped-call]
+        for key in img.GetMetaDataKeys():
+            properties[key] = img.GetMetaData(key)
         return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
@@ -74,11 +74,11 @@ class SitkConverter:
     def from_image(self, image: Any) -> sitk.Image:
         arr = image.array
         sitk_image: Any = sitk.GetImageFromArray(arr)
-        sitk_image.SetSpacing(image.spacing)  # type: ignore[no-untyped-call]
-        sitk_image.SetOrigin(image.origin)  # type: ignore[no-untyped-call]
+        sitk_image.SetSpacing(image.spacing)
+        sitk_image.SetOrigin(image.origin)
         direction_flat = image.direction.flatten().tolist()
-        sitk_image.SetDirection(direction_flat)  # type: ignore[no-untyped-call]
+        sitk_image.SetDirection(direction_flat)
         for key, value in image.properties.items():
-            sitk_image.SetMetaData(key, str(value))  # type: ignore[no-untyped-call]
+            sitk_image.SetMetaData(key, str(value))
         result: sitk.Image = sitk_image
         return result

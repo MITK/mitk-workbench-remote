@@ -1228,7 +1228,6 @@ def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
 @responses.activate
 def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
     """as_type=MITK propagates ImportError when mitk is not installed."""
-    import sys
     from unittest.mock import patch
 
     node = _make_direct_node()
