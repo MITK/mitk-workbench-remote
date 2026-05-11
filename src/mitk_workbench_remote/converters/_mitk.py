@@ -77,9 +77,9 @@ class MitkImageConverter:
             "direction": direction,
         }
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         img: mitk.Image = obj
-        metadata: dict[str, Any] = {}
+        properties: dict[str, Any] = {}
         for key in img.property_keys:
             val = img.get_property(key)  # raw=False: returns coerced Python value
             if val is None:
@@ -87,10 +87,10 @@ class MitkImageConverter:
             if isinstance(val, mitk.BaseProperty):
                 # Unknown type -- no native Python equivalent.
                 # to_json() is guaranteed on every BaseProperty subclass.
-                metadata[key] = json.loads(val.to_json())
+                properties[key] = json.loads(val.to_json())
             else:
-                metadata[key] = val
-        return metadata
+                properties[key] = val
+        return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
         img: mitk.Image = obj
@@ -112,6 +112,12 @@ class MitkImageConverter:
         from mitk_workbench_remote.image import Image as _Image
 
         img: _Image = image
+        if img.ndim != 3:
+            raise ValueError(
+                f"MitkImageConverter.from_image only supports 3D images "
+                f"(got ndim={img.ndim}). The mitk.Image.from_numpy binding "
+                f"requires 3D spacing/origin/direction."
+            )
         direction = np.asarray(img.direction, dtype=np.float64)
         return mitk.Image.from_numpy(
             img.array,

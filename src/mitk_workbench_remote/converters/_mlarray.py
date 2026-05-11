@@ -52,7 +52,7 @@ class MLArrayConverter:
             result["direction"] = np.asarray(obj.direction, dtype=np.float64)
         return result
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         if hasattr(obj, "meta") and hasattr(obj.meta, "extra") and obj.meta.extra:
             return dict(obj.meta.extra)
         return {}

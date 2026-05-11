@@ -69,9 +69,9 @@ def test_numpy_converter_extract_geometry_empty() -> None:
     assert c.extract_geometry(np.zeros(3)) == {}
 
 
-def test_numpy_converter_extract_metadata_empty() -> None:
+def test_numpy_converter_extract_properties_empty() -> None:
     c = NumpyConverter()
-    assert c.extract_metadata(np.zeros(3)) == {}
+    assert c.extract_properties(np.zeros(3)) == {}
 
 
 def test_numpy_converter_to_ndarray_returns_same_object() -> None:

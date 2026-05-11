@@ -41,7 +41,7 @@ class SitkConverter:
         return isinstance(obj, sitk.Image)
 
     def extract_geometry(self, obj: Any) -> dict[str, Any]:
-        img: sitk.Image = obj
+        img: Any = obj
         ndim = img.GetDimension()  # type: ignore[no-untyped-call]
         spacing = img.GetSpacing()  # type: ignore[no-untyped-call]
         origin = img.GetOrigin()  # type: ignore[no-untyped-call]
@@ -54,12 +54,12 @@ class SitkConverter:
             "direction": direction,
         }
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
-        img: sitk.Image = obj
-        metadata: dict[str, Any] = {}
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
+        img: Any = obj
+        properties: dict[str, Any] = {}
         for key in img.GetMetaDataKeys():  # type: ignore[no-untyped-call]
-            metadata[key] = img.GetMetaData(key)  # type: ignore[no-untyped-call]
-        return metadata
+            properties[key] = img.GetMetaData(key)  # type: ignore[no-untyped-call]
+        return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
         return sitk.GetArrayFromImage(obj)
@@ -73,11 +73,12 @@ class SitkConverter:
 
     def from_image(self, image: Any) -> sitk.Image:
         arr = image.array
-        sitk_image = sitk.GetImageFromArray(arr)
+        sitk_image: Any = sitk.GetImageFromArray(arr)
         sitk_image.SetSpacing(image.spacing)  # type: ignore[no-untyped-call]
         sitk_image.SetOrigin(image.origin)  # type: ignore[no-untyped-call]
         direction_flat = image.direction.flatten().tolist()
         sitk_image.SetDirection(direction_flat)  # type: ignore[no-untyped-call]
         for key, value in image.properties.items():
             sitk_image.SetMetaData(key, str(value))  # type: ignore[no-untyped-call]
-        return sitk_image
+        result: sitk.Image = sitk_image
+        return result

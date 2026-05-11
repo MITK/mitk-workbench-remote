@@ -143,7 +143,7 @@ class Label:
         for x in c:
             if not (0.0 <= x <= 1.0):
                 raise ValueError(f"color components must be in [0.0, 1.0], got {x}")
-        self._color = c  # type: ignore[assignment]
+        self._color = c
 
     @property
     def opacity(self) -> float:
@@ -277,7 +277,7 @@ class MultiLabelSegmentation:
         *,
         groups: list[LabelGroup],
         labels: dict[int, Label],
-        group_images: list[Any | None] | None = None,
+        group_images: Sequence[Any | None] | None = None,
         spacing: Sequence[float] | np.ndarray | None = None,
         origin: Sequence[float] | np.ndarray | None = None,
         direction: Sequence[Any] | np.ndarray | None = None,
@@ -415,7 +415,10 @@ class MultiLabelSegmentation:
     @property
     def labels(self) -> list[Label]:
         """All Label objects across all groups, sorted by value."""
-        return sorted(self._labels.values(), key=lambda label: label.value)
+        # _labels is keyed by assigned integer values, so label.value is never None here.
+        return sorted(
+            self._labels.values(), key=lambda label: -1 if label.value is None else label.value
+        )
 
     @property
     def spacing(self) -> tuple[float, ...]:

@@ -100,32 +100,32 @@ def test_extract_geometry_2d_caps_dimensions() -> None:
 
 
 # ---------------------------------------------------------------------------
-# extract_metadata
+# extract_properties
 # ---------------------------------------------------------------------------
 
 
-def test_extract_metadata_returns_scalar_primitives() -> None:
+def test_extract_properties_returns_scalar_primitives() -> None:
     converter = MitkImageConverter()
     img = _make_3d_mitk_image()
     img.set_property("name", "abc")
     img.set_property("opacity", 0.5)
     img.set_property("visible", True)
 
-    metadata = converter.extract_metadata(img)
+    properties = converter.extract_properties(img)
 
-    assert metadata.get("name") == "abc"
-    assert isinstance(metadata["name"], str)
-    assert abs(metadata.get("opacity", -1) - 0.5) < 1e-5
-    assert metadata.get("visible") is True
+    assert properties.get("name") == "abc"
+    assert isinstance(properties["name"], str)
+    assert abs(properties.get("opacity", -1) - 0.5) < 1e-5
+    assert properties.get("visible") is True
 
 
-def test_extract_metadata_color_property_round_trips() -> None:
+def test_extract_properties_color_property_round_trips() -> None:
     converter = MitkImageConverter()
     img = _make_3d_mitk_image()
     img.set_property("color", mitk.ColorProperty.from_rgb(1.0, 0.5, 0.0))
 
-    metadata = converter.extract_metadata(img)
-    val = metadata.get("color")
+    properties = converter.extract_properties(img)
+    val = properties.get("color")
 
     # get_property() coerces ColorProperty to a 3-tuple via propertyToPythonValue
     assert val is not None

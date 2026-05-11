@@ -72,13 +72,21 @@ class DataRepresentation(str, Enum):
 
 
 def _apply_remote_properties_to_mitk(mitk_img: Any, props: dict[str, Any]) -> None:
-    """Apply a plain-Python property dict onto a ``mitk.Image``.
+    """Apply a property dict (as returned by ``get_properties``) onto a ``mitk.Image``.
 
-    Scalar types (``bool``, ``int``, ``float``, ``str``, ``(r, g, b)`` tuple)
-    are passed directly to ``set_property()`` and auto-wrapped by the binding.
-    Dict-form values (``{"type": "...", "value": ...}``) from the REST API are
-    reconstructed via ``mitk.BaseProperty.from_json()``, which handles every
-    property type that has a self-contained JSON representation.
+    The input ``props`` is the output of
+    :func:`mitk_workbench_remote.properties._deserialize_property`, so values
+    have already been coerced for every type in
+    :data:`~mitk_workbench_remote.properties._COMPLEX_DESERIALIZERS`
+    (currently only ``ColorProperty`` → tuple). Those values, along with
+    primitive scalars (``bool``, ``int``, ``float``, ``str``), are passed
+    directly to ``set_property()`` and auto-wrapped by the binding.
+
+    Any value that is still in raw dict form ``{"type": "...", "value": ...}``
+    is therefore an *unknown* complex type — one that was not stripped by the
+    deserializer. These are reconstructed via ``mitk.BaseProperty.from_json()``,
+    which handles every property type that has a self-contained JSON
+    representation.
 
     Args:
         mitk_img: A ``mitk.Image`` instance.
@@ -420,14 +428,16 @@ class DataNode:
     def children(self) -> list[DataNode]:
         """Child nodes of this node. Always fetches from the server."""
         params: dict[str, str | int] = {"limit": 1000, "offset": 0}
+        offset = 0
         nodes: list[DataNode] = []
         while True:
             resp = self._transport.get(f"/datastorage/nodes/{self._uid}/children", params=params)
             body = resp.json()
             nodes.extend(DataNode._from_node_dict(d, self._transport) for d in body["data"])
             total_count: int = int(body["meta"]["total_count"])
-            params["offset"] = int(params["offset"]) + len(body["data"])
-            if params["offset"] >= total_count:
+            offset += len(body["data"])
+            params["offset"] = offset
+            if offset >= total_count:
                 break
         return nodes
 
@@ -810,7 +820,7 @@ class DataNode:
             else:
                 converter = find_image_converter(data)
                 if converter is not None:
-                    properties = converter.extract_metadata(data)
+                    properties = converter.extract_properties(data)
             if properties:
                 self.update_properties(scope=PropertyScope.DATA, **properties)
 

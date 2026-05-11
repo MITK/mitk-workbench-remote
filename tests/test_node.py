@@ -1241,7 +1241,10 @@ def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
         content_type="application/octet-stream",
     )
 
-    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
+    with (
+        patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")),
+        pytest.raises(ImportError),
+    ):
         node.get_data(as_type=DataRepresentation.MITK)
 
 
@@ -1386,6 +1389,16 @@ class TestGetDataWithMitk:
 
     @responses.activate
     def test_get_data_image_include_properties_dict_form_via_from_json(self) -> None:
+        """Cover the ``from_json`` branch in ``_apply_remote_properties_to_mitk``.
+
+        Uses ``TemporoSpatialStringProperty`` because it is *not* listed in
+        ``properties._COMPLEX_DESERIALIZERS`` -- so its dict-form wire payload
+        survives ``_deserialize_property`` unchanged and reaches
+        ``_apply_remote_properties_to_mitk`` as a raw dict. That is the only
+        input shape that triggers the ``mitk.BaseProperty.from_json()`` call.
+        ``ColorProperty`` would not exercise this branch because the
+        deserializer coerces it to a tuple first (auto-wrap path).
+        """
         import mitk
 
         node = _make_direct_node()
@@ -1404,7 +1417,10 @@ class TestGetDataWithMitk:
             json={
                 "data": {
                     "properties": {
-                        "color": {"type": "ColorProperty", "value": [1.0, 0.5, 0.0]},
+                        "tsstring": {
+                            "type": "TemporoSpatialStringProperty",
+                            "value": {"values": [{"t": 0, "z": 0, "value": "hello"}]},
+                        },
                     }
                 }
             },
@@ -1414,12 +1430,9 @@ class TestGetDataWithMitk:
         result = node.get_data(as_type=DataRepresentation.MITK, include_properties=True)
         assert isinstance(result, mitk.Image)
 
-        raw_prop = result.get_property("color", raw=True)
-        assert isinstance(raw_prop, mitk.ColorProperty)
-        color = raw_prop.value
-        assert abs(color[0] - 1.0) < 1e-5
-        assert abs(color[1] - 0.5) < 1e-5
-        assert abs(color[2] - 0.0) < 1e-5
+        raw_prop = result.get_property("tsstring", raw=True)
+        assert isinstance(raw_prop, mitk.TemporoSpatialStringProperty)
+        assert raw_prop.value == "hello"
 
     # ------------------------------------------------------------------
     # MLS + mitk

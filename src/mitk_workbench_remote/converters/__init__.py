@@ -52,8 +52,8 @@ class ImageConverter(Protocol):
         """Extract spatial geometry (spacing, origin, direction) from the object."""
         ...
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
-        """Extract custom properties/properties from the object."""
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
+        """Extract custom properties from the object."""
         ...
 
     def to_ndarray(self, obj: Any) -> np.ndarray:

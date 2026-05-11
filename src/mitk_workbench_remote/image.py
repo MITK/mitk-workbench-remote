@@ -78,7 +78,7 @@ class Image:
             self._source_data = data
             self._converter = converter
             geo_defaults = converter.extract_geometry(data)
-            properties_defaults = converter.extract_metadata(data)
+            properties_defaults = converter.extract_properties(data)
             # Need ndim: try to get from geometry, else materialize array
             if "spacing" in geo_defaults:
                 ndim = len(geo_defaults["spacing"])
@@ -309,8 +309,9 @@ class Image:
                 "It is available when using MITK's Python environment."
             ) from None
 
-        from mitk_workbench_remote.converters import find_converter_for_type
         import mitk as _mitk
+
+        from mitk_workbench_remote.converters import find_converter_for_type
 
         converter = find_converter_for_type(_mitk.Image)
         if converter is None:
