@@ -414,11 +414,25 @@ class MultiLabelSegmentation:
 
     @property
     def labels(self) -> list[Label]:
-        """All Label objects across all groups, sorted by value."""
-        # _labels is keyed by assigned integer values, so label.value is never None here.
-        return sorted(
-            self._labels.values(), key=lambda label: -1 if label.value is None else label.value
-        )
+        """All Label objects across all groups, sorted by value.
+
+        Raises:
+            ValueError: If any label still has ``value is None``. By
+                construction, ``add_label`` assigns a value before storing,
+                so a ``None`` here indicates internal-state corruption —
+                aliasing it onto the reserved ``UNLABELED_VALUE`` (0) would
+                hide a real bug.
+        """
+
+        def _key(label: Label) -> int:
+            if label.value is None:
+                raise ValueError(
+                    f"Label {label!r} has value=None — labels stored on a "
+                    "MultiLabelSegmentation must have a non-None value (>= 1)."
+                )
+            return label.value
+
+        return sorted(self._labels.values(), key=_key)
 
     @property
     def spacing(self) -> tuple[float, ...]:
@@ -536,7 +550,8 @@ class MultiLabelSegmentation:
             ) from None
         from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
 
-        return MitkSegmentationConverter().to_segmentation(mitk_seg)
+        result: MultiLabelSegmentation = MitkSegmentationConverter().to_segmentation(mitk_seg)
+        return result
 
     # ------------------------------------------------------------------
     # Lookup
@@ -835,7 +850,13 @@ class MultiLabelSegmentation:
     # ------------------------------------------------------------------
 
     def _compose_array(self) -> np.ndarray:
-        """Compose all group images into a 4D array [num_groups, x, y, z].
+        """Compose all group images into a 4D array ``[num_groups, Z, Y, X]``.
+
+        Per-group spatial arrays follow the same ``(Z, Y, X)`` numpy
+        layout :class:`~mitk_workbench_remote.image.Image` uses, so a
+        voxel at ``arr[k, j, i]`` lives at world ``(i*sx, j*sy, k*sz)``.
+        The multilabel NRRD writer transposes to MITK's wire layout at
+        the I/O boundary; callers do not see the F-order quirk.
 
         Raises:
             ValueError: If there are no groups or if shape is unknown.
