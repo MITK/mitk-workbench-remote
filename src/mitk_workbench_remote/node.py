@@ -72,13 +72,21 @@ class DataRepresentation(str, Enum):
 
 
 def _apply_remote_properties_to_mitk(mitk_img: Any, props: dict[str, Any]) -> None:
-    """Apply a plain-Python property dict onto a ``mitk.Image``.
+    """Apply a property dict (as returned by ``get_properties``) onto a ``mitk.Image``.
 
-    Scalar types (``bool``, ``int``, ``float``, ``str``, ``(r, g, b)`` tuple)
-    are passed directly to ``set_property()`` and auto-wrapped by the binding.
-    Dict-form values (``{"type": "...", "value": ...}``) from the REST API are
-    reconstructed via ``mitk.BaseProperty.from_json()``, which handles every
-    property type that has a self-contained JSON representation.
+    The input ``props`` is the output of
+    :func:`mitk_workbench_remote.properties._deserialize_property`, so values
+    have already been coerced for every type in
+    :data:`~mitk_workbench_remote.properties._COMPLEX_DESERIALIZERS`
+    (currently only ``ColorProperty`` → tuple). Those values, along with
+    primitive scalars (``bool``, ``int``, ``float``, ``str``), are passed
+    directly to ``set_property()`` and auto-wrapped by the binding.
+
+    Any value that is still in raw dict form ``{"type": "...", "value": ...}``
+    is therefore an *unknown* complex type — one that was not stripped by the
+    deserializer. These are reconstructed via ``mitk.BaseProperty.from_json()``,
+    which handles every property type that has a self-contained JSON
+    representation.
 
     Args:
         mitk_img: A ``mitk.Image`` instance.

@@ -112,6 +112,12 @@ class MitkImageConverter:
         from mitk_workbench_remote.image import Image as _Image
 
         img: _Image = image
+        if img.ndim != 3:
+            raise ValueError(
+                f"MitkImageConverter.from_image only supports 3D images "
+                f"(got ndim={img.ndim}). The mitk.Image.from_numpy binding "
+                f"requires 3D spacing/origin/direction."
+            )
         direction = np.asarray(img.direction, dtype=np.float64)
         return mitk.Image.from_numpy(
             img.array,
