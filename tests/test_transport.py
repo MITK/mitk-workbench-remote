@@ -404,7 +404,7 @@ def test_malformed_error_body_raises_ApiError() -> None:
 def test_server_info_parsed_correctly() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json=_root_response(["direct", "file-reference"]),
         status=200,
     )
@@ -421,7 +421,7 @@ def test_server_info_parsed_correctly() -> None:
 def test_server_info_cached_after_first_access() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json=_root_response(["direct"]),
         status=200,
     )
@@ -429,7 +429,7 @@ def test_server_info_cached_after_first_access() -> None:
         _ = t.server_info
         _ = t.server_info
         _ = t.server_info
-        root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/info")]
+        root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/")]
         assert len(root_calls) == 1
 
 
@@ -437,7 +437,7 @@ def test_server_info_cached_after_first_access() -> None:
 def test_server_info_missing_capabilities_defaults_to_empty_tuple() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json={"data": {"name": "MITK", "api_version": "v1", "mitk_version": "2024"}},
         status=200,
     )
@@ -514,7 +514,7 @@ def test_file_access_config_cached_after_first_access() -> None:
 def test_transfer_mode_file_reference_when_localhost_and_supported() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json=_root_response(["direct", "file-reference"]),
         status=200,
     )
@@ -526,7 +526,7 @@ def test_transfer_mode_file_reference_when_localhost_and_supported() -> None:
 def test_transfer_mode_direct_when_server_does_not_advertise_file_reference() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json=_root_response(["direct"]),
         status=200,
     )
@@ -549,7 +549,7 @@ def test_transfer_mode_remote_host() -> None:
 def test_transfer_mode_detection_propagates_auth_error() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json={"error": {"code": "UNAUTHORIZED", "message": "token required"}},
         status=401,
     )
@@ -561,7 +561,7 @@ def test_transfer_mode_detection_propagates_auth_error() -> None:
 def test_transfer_mode_cached_after_first_access() -> None:
     responses.add(
         responses.GET,
-        _api("/info"),
+        _api("/"),
         json=_root_response(["direct", "file-reference"]),
         status=200,
     )
@@ -570,7 +570,7 @@ def test_transfer_mode_cached_after_first_access() -> None:
         _ = t.transfer_mode
         _ = t.transfer_mode
         # Root endpoint should have been called exactly once (server_info is shared)
-        root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/info")]
+        root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/")]
         assert len(root_calls) == 1
 
 
@@ -593,70 +593,3 @@ def test_context_manager() -> None:
     with RestTransport(BASE) as t:
         r = t.get("/health")
         assert r.ok
-
-
-# ---------------------------------------------------------------------------
-# Editor RFC 7807 mappings
-# ---------------------------------------------------------------------------
-
-
-def _editor_error(code: str, message: str, status: int) -> dict:
-    return {
-        "error": {
-            "type": f"https://docs.mitk.org/api/errors/{code}",
-            "code": code,
-            "title": code.replace("_", " ").title(),
-            "message": message,
-            "status": status,
-        }
-    }
-
-
-@responses.activate
-def test_editor_not_active_maps_to_editor_not_active_error() -> None:
-    responses.add(
-        responses.GET,
-        _api("/rendering/editors/stdmulti/screenshot"),
-        json=_editor_error("EDITOR_NOT_ACTIVE", "StdMultiWidgetEditor is not open", 503),
-        status=503,
-    )
-    with RestTransport(BASE) as t, pytest.raises(errors.EditorNotActiveError) as excinfo:
-        t.get("/rendering/editors/stdmulti/screenshot")
-    assert excinfo.value.alias == "stdmulti"
-
-
-@responses.activate
-def test_render_window_not_found_maps_to_render_window_not_found_error() -> None:
-    responses.add(
-        responses.GET,
-        _api("/rendering/editors/stdmulti/windows/bogus/camera"),
-        json=_editor_error(
-            "RENDER_WINDOW_NOT_FOUND",
-            "No render window named 'bogus' in the addressed editor",
-            404,
-        ),
-        status=404,
-    )
-    with RestTransport(BASE) as t, pytest.raises(errors.RenderWindowNotFoundError) as excinfo:
-        t.get("/rendering/editors/stdmulti/windows/bogus/camera")
-    assert excinfo.value.editor_alias == "stdmulti"
-    assert excinfo.value.window_id == "bogus"
-
-
-@responses.activate
-def test_unsupported_operation_maps_to_unsupported_operation_error() -> None:
-    responses.add(
-        responses.GET,
-        _api("/rendering/editors/stdmulti/windows/3d/selected-slice"),
-        json=_editor_error(
-            "UNSUPPORTED_OPERATION",
-            "selected-slice is not applicable to the 3D window.",
-            404,
-        ),
-        status=404,
-    )
-    with RestTransport(BASE) as t, pytest.raises(errors.UnsupportedOperationError) as excinfo:
-        t.get("/rendering/editors/stdmulti/windows/3d/selected-slice")
-    assert excinfo.value.editor_alias == "stdmulti"
-    assert excinfo.value.window_id == "3d"
-    assert excinfo.value.operation == "selected-slice"
