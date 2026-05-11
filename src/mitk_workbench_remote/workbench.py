@@ -100,6 +100,22 @@ class PositionBounds:
     max: tuple[float, float, float] | None
 
 
+def _position_bounds_from_json(b: dict[str, Any]) -> PositionBounds:
+    """Parse a ``{"min": [...], "max": [...]}`` JSON dict into a PositionBounds.
+
+    ``min`` and ``max`` may each be ``None`` when no geometry is loaded.
+    """
+    bmin: tuple[float, float, float] | None = None
+    bmax: tuple[float, float, float] | None = None
+    if b.get("min") is not None:
+        bx, by, bz = b["min"]
+        bmin = (bx, by, bz)
+    if b.get("max") is not None:
+        mx, my, mz = b["max"]
+        bmax = (mx, my, mz)
+    return PositionBounds(min=bmin, max=bmax)
+
+
 @dataclass(frozen=True)
 class SelectedPosition:
     """Current crosshair position and scene bounds.
@@ -478,18 +494,9 @@ class Workbench:
         _log.debug("[%s] get_position", self.url)
         body = self._transport.get("/rendering/selected-position").json()
         x, y, z = body["position"]
-        b = body["bounds"]
-        bmin: tuple[float, float, float] | None = None
-        bmax: tuple[float, float, float] | None = None
-        if b["min"] is not None:
-            bx, by, bz = b["min"]
-            bmin = (bx, by, bz)
-        if b["max"] is not None:
-            mx, my, mz = b["max"]
-            bmax = (mx, my, mz)
         return SelectedPosition(
             position=(x, y, z),
-            bounds=PositionBounds(min=bmin, max=bmax),
+            bounds=_position_bounds_from_json(body["bounds"]),
         )
 
     def set_position(self, position: tuple[float, float, float] | list[float]) -> None:

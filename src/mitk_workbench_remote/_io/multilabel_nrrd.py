@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 import nrrd
 import numpy as np
 
-from mitk_workbench_remote._io.nrrd import _MITK_SPACE, _extract_spatial
+from mitk_workbench_remote._io.nrrd import _INDEX_ORDER, _MITK_SPACE, _extract_spatial
 
 _log = logging.getLogger(__name__)
 
@@ -104,9 +104,9 @@ def read_multilabel_nrrd_raw(
     if isinstance(source, bytes):
         buf = io.BytesIO(source)
         header = nrrd.read_header(buf)
-        data = nrrd.read_data(header, buf, None)
+        data = nrrd.read_data(header, buf, None, index_order=_INDEX_ORDER)
     else:
-        data, header = nrrd.read(str(source))
+        data, header = nrrd.read(str(source), index_order=_INDEX_ORDER)
 
     # Determine spatial ndim (excluding vector axis)
     kinds = header.get("kinds", [])
@@ -136,7 +136,7 @@ def write_multilabel_nrrd_raw(
     spacing: tuple[float, ...],
     origin: tuple[float, ...],
     direction: np.ndarray,
-    metadata: dict[str, Any] | None = None,
+    properties: dict[str, Any] | None = None,
     path: str | Path | None = None,
 ) -> bytes:
     """Write a 4D multilabel NRRD.
@@ -147,7 +147,7 @@ def write_multilabel_nrrd_raw(
         spacing: Voxel spacing for the spatial dimensions.
         origin: World-space origin.
         direction: Direction cosine matrix for spatial dims.
-        metadata: Additional custom properties for the header.
+        properties: Additional custom properties for the header.
         path: If given, writes to this file path. Always returns bytes.
 
     Returns:
@@ -174,16 +174,16 @@ def write_multilabel_nrrd_raw(
     header[_LABELGROUPS_KEY] = serialize_labelgroups_json(groups_data)
     header[_MODALITY_KEY] = _MODALITY_VALUE
 
-    if metadata:
-        for key, value in metadata.items():
+    if properties:
+        for key, value in properties.items():
             header[key] = value
 
     if path is not None:
-        nrrd.write(str(path), data, header)
+        nrrd.write(str(path), data, header, index_order=_INDEX_ORDER)
         return Path(path).read_bytes()
 
     buf = io.BytesIO()
-    nrrd.write(buf, data, header)
+    nrrd.write(buf, data, header, index_order=_INDEX_ORDER)
     return buf.getvalue()
 
 
@@ -238,6 +238,8 @@ def _labelgroup_from_dict(g: dict[str, Any]) -> tuple[LabelGroup, list[Label]]:
         if label_dict.get("value", 0) == 0:
             continue  # skip UNLABELED_VALUE
         label = _label_from_dict(label_dict)
+        if label.value is None:
+            raise ValueError("Label loaded from NRRD has no value assigned")
         group._label_ids.append(label.value)
         labels.append(label)
     return group, labels
@@ -320,6 +322,8 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
         group, group_labels = _labelgroup_from_dict(group_dict)
         groups.append(group)
         for label in group_labels:
+            # _labelgroup_from_dict guarantees label.value is not None.
+            assert label.value is not None
             labels_dict[label.value] = label
         group_images.append(
             Image(
@@ -364,6 +368,6 @@ def write_multilabel_nrrd(seg: MultiLabelSegmentation, *, path: str | Path | Non
         spacing=seg.spacing,
         origin=seg.origin,
         direction=seg.direction,
-        metadata=seg.metadata if seg.metadata else None,
+        properties=seg.properties if seg.properties else None,
         path=path,
     )

@@ -143,7 +143,7 @@ class Label:
         for x in c:
             if not (0.0 <= x <= 1.0):
                 raise ValueError(f"color components must be in [0.0, 1.0], got {x}")
-        self._color = c  # type: ignore[assignment]
+        self._color = c
 
     @property
     def opacity(self) -> float:
@@ -264,11 +264,15 @@ class MultiLabelSegmentation:
         spacing: Voxel spacing (3D).
         origin: World-space origin (3D).
         direction: Direction cosine matrix (3x3).
-        properties: Data-scope metadata dict.
+        properties: Data-scope properties dict.
 
     Raises:
         ValueError: On shape/geometry inconsistency or duplicate/missing label IDs.
     """
+
+    # TODO(WP-11): Add to_mitk() once mitk.MultiLabelSegmentation is wrapped and
+    # MitkSegmentationConverter is implemented. The C++ side already has
+    # InitMultiLabelSegmentation (Module.cpp:31). See MITK_Interoperability_Design.md §WP-11.
 
     UNLABELED_VALUE: int = 0
 
@@ -277,7 +281,7 @@ class MultiLabelSegmentation:
         *,
         groups: list[LabelGroup],
         labels: dict[int, Label],
-        group_images: list[Any | None] | None = None,
+        group_images: Sequence[Any | None] | None = None,
         spacing: Sequence[float] | np.ndarray | None = None,
         origin: Sequence[float] | np.ndarray | None = None,
         direction: Sequence[Any] | np.ndarray | None = None,
@@ -415,7 +419,10 @@ class MultiLabelSegmentation:
     @property
     def labels(self) -> list[Label]:
         """All Label objects across all groups, sorted by value."""
-        return sorted(self._labels.values(), key=lambda label: label.value)
+        # _labels is keyed by assigned integer values, so label.value is never None here.
+        return sorted(
+            self._labels.values(), key=lambda label: -1 if label.value is None else label.value
+        )
 
     @property
     def spacing(self) -> tuple[float, ...]:
@@ -433,9 +440,45 @@ class MultiLabelSegmentation:
         return self._direction
 
     @property
-    def metadata(self) -> dict[str, Any]:
-        """Data-scope properties/metadata dict."""
-        return self._properties
+    def properties(self) -> dict[str, Any]:
+        """Data-scope properties dict."""
+        return dict(self._properties)
+
+    @property
+    def property_keys(self) -> list[str]:
+        """List of property keys."""
+        return list(self._properties.keys())
+
+    def get_property(self, key: str) -> Any:
+        """Get a property by key.
+
+        Args:
+            key: Property key.
+
+        Returns:
+            The property value, or ``None`` if not found.
+        """
+        return self._properties.get(key)
+
+    def set_property(self, key: str, value: Any) -> None:
+        """Set a property by key.
+
+        Args:
+            key: Property key.
+            value: Property value.
+        """
+        self._properties[key] = value
+
+    def remove_property(self, key: str) -> None:
+        """Remove a property by key.
+
+        Args:
+            key: Property key.
+
+        Raises:
+            KeyError: If the key does not exist.
+        """
+        del self._properties[key]
 
     # ------------------------------------------------------------------
     # Lookup

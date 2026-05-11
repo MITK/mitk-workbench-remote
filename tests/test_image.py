@@ -67,15 +67,15 @@ def test_image_custom_direction() -> None:
     np.testing.assert_array_equal(img.direction, d)
 
 
-def test_image_default_metadata_is_empty_dict() -> None:
+def test_image_default_properties_is_empty_dict() -> None:
     img = Image(np.zeros((3, 4, 5)))
-    assert img.metadata == {}
+    assert img.properties == {}
 
 
-def test_image_custom_metadata() -> None:
+def test_image_custom_properties() -> None:
     meta = {"key1": "value1", "key2": 42}
     img = Image(np.zeros((3, 4, 5)), properties=meta)
-    assert img.metadata == meta
+    assert img.properties == meta
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ def test_image_from_converter_lazy_array() -> None:
     mock_converter = MagicMock()
     mock_converter.can_handle.return_value = True
     mock_converter.extract_geometry.return_value = {"spacing": (1.0, 1.0, 1.0)}
-    mock_converter.extract_metadata.return_value = {}
+    mock_converter.extract_properties.return_value = {}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(
@@ -125,7 +125,7 @@ def test_image_from_converter_extracts_geometry() -> None:
         "spacing": (0.5, 1.0, 2.0),
         "origin": (10.0, 20.0, 30.0),
     }
-    mock_converter.extract_metadata.return_value = {"my_key": "my_value"}
+    mock_converter.extract_properties.return_value = {"my_key": "my_value"}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(
@@ -134,7 +134,7 @@ def test_image_from_converter_extracts_geometry() -> None:
         img = Image("fake_data")
         assert img.spacing == (0.5, 1.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)
-        assert img.metadata == {"my_key": "my_value"}
+        assert img.properties == {"my_key": "my_value"}
 
 
 def test_image_explicit_kwargs_override_converter_geometry() -> None:
@@ -144,7 +144,7 @@ def test_image_explicit_kwargs_override_converter_geometry() -> None:
         "spacing": (0.5, 1.0, 2.0),
         "origin": (10.0, 20.0, 30.0),
     }
-    mock_converter.extract_metadata.return_value = {"extracted": True}
+    mock_converter.extract_properties.return_value = {"extracted": True}
     mock_converter.to_ndarray.return_value = np.zeros((3, 4, 5))
 
     with patch(
@@ -153,7 +153,7 @@ def test_image_explicit_kwargs_override_converter_geometry() -> None:
         img = Image("fake_data", spacing=(2.0, 2.0, 2.0), properties={"custom": True})
         assert img.spacing == (2.0, 2.0, 2.0)
         assert img.origin == (10.0, 20.0, 30.0)  # not overridden
-        assert img.metadata == {"custom": True}  # overridden
+        assert img.properties == {"custom": True}  # overridden
 
 
 def test_image_unsupported_type_raises_TypeError() -> None:
@@ -287,3 +287,65 @@ def test_repr_html_escapes_special_characters_in_property_values() -> None:
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "&lt;b&gt;xss&lt;/b&gt;" in html
+
+
+# ---------------------------------------------------------------------------
+# to_mitk -- requires the ``mitk`` package (WP-7)
+# ---------------------------------------------------------------------------
+
+_MITK_OBLIQUE = [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+
+
+class TestToMitk:
+    """Tests for Image.to_mitk() -- all gated on the mitk package."""
+
+    @pytest.fixture(autouse=True)
+    def require_mitk(self) -> None:
+        pytest.importorskip("mitk")
+
+    def _make_image(self) -> Image:
+        arr = np.arange(60, dtype=np.float32).reshape(3, 4, 5)
+        return Image(
+            arr,
+            spacing=(1.0, 2.0, 3.0),
+            origin=(4.0, 5.0, 6.0),
+            direction=np.array(_MITK_OBLIQUE, dtype=np.float64),
+        )
+
+    def test_to_mitk_returns_mitk_image(self) -> None:
+        import mitk
+
+        result = self._make_image().to_mitk()
+        assert isinstance(result, mitk.Image)
+
+    def test_to_mitk_preserves_geometry(self) -> None:
+        result = self._make_image().to_mitk()
+        np.testing.assert_allclose(result.get_spacing(time_step=0), (1.0, 2.0, 3.0), rtol=1e-5)
+        np.testing.assert_allclose(result.get_origin(time_step=0), (4.0, 5.0, 6.0), rtol=1e-5)
+        np.testing.assert_allclose(
+            np.asarray(result.get_direction(time_step=0)),
+            np.array(_MITK_OBLIQUE, dtype=np.float64),
+            atol=1e-10,
+        )
+
+    def test_to_mitk_preserves_pixels(self) -> None:
+        mw_img = self._make_image()
+        result = mw_img.to_mitk()
+        assert np.array_equal(np.asarray(result), mw_img.array)
+
+    def test_to_mitk_raises_importerror_when_mitk_absent(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        mw_img = self._make_image()
+        with (
+            patch.dict(sys.modules, {"mitk": None}),
+            pytest.raises(ImportError, match="mitk"),
+        ):
+            mw_img.to_mitk()
+
+    def test_to_mitk_does_not_transfer_properties(self) -> None:
+        arr = np.zeros((3, 4, 5), dtype=np.uint8)
+        mw_img = Image(arr, properties={"name": "X"})
+        result = mw_img.to_mitk()
+        assert "name" not in result.property_keys

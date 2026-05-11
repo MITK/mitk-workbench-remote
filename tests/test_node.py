@@ -31,6 +31,7 @@ from mitk_workbench_remote.errors import UnsupportedDataTypeError
 from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.node import (
     DataNode,
+    DataRepresentation,
     PropertyScope,
     _deserialize_property,
     _serialize_property,
@@ -559,12 +560,12 @@ def test_set_property_passes_raw_dict_through() -> None:
 
 
 # ---------------------------------------------------------------------------
-# delete_property
+# remove_property
 # ---------------------------------------------------------------------------
 
 
 @responses.activate
-def test_delete_property_sends_delete_request() -> None:
+def test_remove_property_sends_delete_request() -> None:
     node = _make_node()
     responses.add(
         responses.DELETE,
@@ -572,12 +573,12 @@ def test_delete_property_sends_delete_request() -> None:
         body=b"",
         status=204,
     )
-    node.delete_property("myProp")
+    node.remove_property("myProp")
     assert len(responses.calls) == 1
 
 
 @responses.activate
-def test_delete_property_passes_scope_param() -> None:
+def test_remove_property_passes_scope_param() -> None:
     node = _make_node()
     responses.add(
         responses.DELETE,
@@ -585,7 +586,7 @@ def test_delete_property_passes_scope_param() -> None:
         body=b"",
         status=204,
     )
-    node.delete_property("myProp", scope=PropertyScope.DATA)
+    node.remove_property("myProp", scope=PropertyScope.DATA)
     assert "property_scope=data" in responses.calls[0].request.url
 
 
@@ -817,7 +818,7 @@ def test_get_data_direct_mode() -> None:
         status=200,
         content_type="application/octet-stream",
     )
-    image = node.get_data()
+    image = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(image, Image)
     assert image.shape == (2, 3, 4)
     assert np.allclose(image.spacing, (0.5, 1.0, 2.0))
@@ -837,7 +838,7 @@ def test_get_data_file_reference_mode(tmp_path: Path) -> None:
         status=200,
         content_type="application/json",
     )
-    image = node.get_data()
+    image = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(image, Image)
     assert image.shape == (2, 3, 4)
 
@@ -856,7 +857,7 @@ def test_get_data_include_properties_false() -> None:
     image = node.get_data(include_properties=False)
     # properties should not contain server-fetched properties
     # (may contain NRRD custom fields, but not node properties)
-    assert "name" not in image.metadata
+    assert "name" not in image.properties
 
 
 @responses.activate
@@ -876,9 +877,9 @@ def test_get_data_include_properties_true() -> None:
         json=_props_response({"imagescalar.min": 0.0, "imagescalar.max": 255.0}),
         status=200,
     )
-    image = node.get_data(include_properties=True)
-    assert image.metadata.get("imagescalar.min") == 0.0
-    assert image.metadata.get("imagescalar.max") == 255.0
+    image = node.get_data(include_properties=True, as_type=DataRepresentation.REMOTE)
+    assert image.get_property("imagescalar.min") == 0.0
+    assert image.get_property("imagescalar.max") == 255.0
 
 
 @responses.activate
@@ -1178,3 +1179,201 @@ def test_set_data_refreshes_data_type_for_ndarray() -> None:
     node.set_data(arr)
     assert node.data_type == "Image"
     assert len(responses.calls) == 2  # PUT data + GET refresh
+
+
+# ---------------------------------------------------------------------------
+# get_data -- DataRepresentation (WP-8)
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_get_data_image_remote_returns_mw_image() -> None:
+    """as_type=REMOTE always returns mw.Image regardless of mitk availability."""
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    result = node.get_data(as_type=DataRepresentation.REMOTE)
+    assert isinstance(result, Image)
+
+
+@responses.activate
+def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
+    """AUTO falls back to mw.Image when mitk.Image conversion raises ImportError."""
+    from unittest.mock import patch
+
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+
+    with patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")):
+        result = node.get_data(as_type=DataRepresentation.AUTO)
+
+    assert isinstance(result, Image)
+
+
+@responses.activate
+def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
+    """as_type=MITK propagates ImportError when mitk is not installed."""
+    from unittest.mock import patch
+
+    node = _make_direct_node()
+    nrrd_bytes = _make_nrrd_bytes()
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+
+    with (
+        patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")),
+        pytest.raises(ImportError),
+    ):
+        node.get_data(as_type=DataRepresentation.MITK)
+
+
+@responses.activate
+def test_get_data_multilabel_mitk_raises_notimplementederror() -> None:
+    """as_type=MITK for MultiLabelSegmentation raises NotImplementedError (WP-11 fence)."""
+    from mitk_workbench_remote._io import write_multilabel_nrrd
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+    node = _make_direct_node(data_type="MultiLabelSegmentation")
+    seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+    seg.add_label(Label(1, "Organ"), group=seg.add_group("Group1"))
+    nrrd_bytes = write_multilabel_nrrd(seg)
+
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+
+    with pytest.raises(NotImplementedError, match="WP-11"):
+        node.get_data(as_type=DataRepresentation.MITK)
+
+
+# ---------------------------------------------------------------------------
+# get_data -- DataRepresentation with mitk installed
+# ---------------------------------------------------------------------------
+
+
+class TestGetDataWithMitk:
+    """Tests that require the ``mitk`` package to be installed."""
+
+    @pytest.fixture(autouse=True)
+    def require_mitk(self) -> None:
+        pytest.importorskip("mitk")
+
+    @responses.activate
+    def test_get_data_image_auto_with_mitk_returns_mitk_image(self) -> None:
+        import mitk
+
+        node = _make_direct_node()
+        nrrd_bytes = _make_nrrd_bytes()
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        result = node.get_data(as_type=DataRepresentation.AUTO)
+        assert isinstance(result, mitk.Image)
+
+    @responses.activate
+    def test_get_data_image_include_properties_routes_to_mitk_auto_wrap(self) -> None:
+        import mitk
+
+        node = _make_direct_node()
+        nrrd_bytes = _make_nrrd_bytes()
+
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/properties"),
+            json={"data": {"properties": {"name": "X"}}},
+            status=200,
+        )
+
+        result = node.get_data(as_type=DataRepresentation.MITK, include_properties=True)
+        assert isinstance(result, mitk.Image)
+
+        # Default (raw=False): coerced to plain Python str
+        assert result.get_property("name") == "X"
+
+        # Explicit raw=False: same coerced value
+        assert result.get_property("name", raw=False) == "X"
+
+        # raw=True: returns the underlying mitk.StringProperty object
+        raw_prop = result.get_property("name", raw=True)
+        assert isinstance(raw_prop, mitk.StringProperty)
+        assert raw_prop.value == "X"
+
+    @responses.activate
+    def test_get_data_image_include_properties_dict_form_via_from_json(self) -> None:
+        """Cover the ``from_json`` branch in ``_apply_remote_properties_to_mitk``.
+
+        Uses ``TemporoSpatialStringProperty`` because it is *not* listed in
+        ``properties._COMPLEX_DESERIALIZERS`` -- so its dict-form wire payload
+        survives ``_deserialize_property`` unchanged and reaches
+        ``_apply_remote_properties_to_mitk`` as a raw dict. That is the only
+        input shape that triggers the ``mitk.BaseProperty.from_json()`` call.
+        ``ColorProperty`` would not exercise this branch because the
+        deserializer coerces it to a tuple first (auto-wrap path).
+        """
+        import mitk
+
+        node = _make_direct_node()
+        nrrd_bytes = _make_nrrd_bytes()
+
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/properties"),
+            json={
+                "data": {
+                    "properties": {
+                        "tsstring": {
+                            "type": "TemporoSpatialStringProperty",
+                            "value": {"values": [{"t": 0, "z": 0, "value": "hello"}]},
+                        },
+                    }
+                }
+            },
+            status=200,
+        )
+
+        result = node.get_data(as_type=DataRepresentation.MITK, include_properties=True)
+        assert isinstance(result, mitk.Image)
+
+        raw_prop = result.get_property("tsstring", raw=True)
+        assert isinstance(raw_prop, mitk.TemporoSpatialStringProperty)
+        assert raw_prop.value == "hello"

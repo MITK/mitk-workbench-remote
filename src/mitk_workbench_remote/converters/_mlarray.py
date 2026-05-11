@@ -52,7 +52,7 @@ class MLArrayConverter:
             result["direction"] = np.asarray(obj.direction, dtype=np.float64)
         return result
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         if hasattr(obj, "meta") and hasattr(obj.meta, "extra") and obj.meta.extra:
             return dict(obj.meta.extra)
         return {}
@@ -76,6 +76,6 @@ class MLArrayConverter:
             result.origin = image.origin
         if hasattr(result, "direction"):
             result.direction = image.direction.tolist()
-        if image.metadata and hasattr(result, "meta") and hasattr(result.meta, "extra"):
-            result.meta.extra = dict(image.metadata)
+        if image.properties and hasattr(result, "meta") and hasattr(result.meta, "extra"):
+            result.meta.extra = dict(image.properties)
         return result

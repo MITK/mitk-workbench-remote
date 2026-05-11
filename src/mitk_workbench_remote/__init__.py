@@ -32,7 +32,8 @@ from mitk_workbench_remote.discovery import discover, launch
 from mitk_workbench_remote.errors import RenderingError, UnsupportedDataTypeError
 from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, LabelGroup, MultiLabelSegmentation
-from mitk_workbench_remote.node import DataNode, PropertyScope
+from mitk_workbench_remote.node import DataNode, DataRepresentation, PropertyScope
+from mitk_workbench_remote.protocols import SpatialImage
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import TransferMode
 from mitk_workbench_remote.workbench import (
@@ -51,6 +52,7 @@ from mitk_workbench_remote.workbench import (
 __all__ = [
     "LABEL_DTYPE",
     "DataNode",
+    "DataRepresentation",
     "DataStorage",
     "Image",
     "Label",
@@ -64,6 +66,7 @@ __all__ = [
     "ScreenshotFormat",
     "SelectedPosition",
     "SelectedTime",
+    "SpatialImage",
     "TimeBounds",
     "TransferMode",
     "UnsupportedDataTypeError",

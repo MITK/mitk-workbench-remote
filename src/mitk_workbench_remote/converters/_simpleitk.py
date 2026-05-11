@@ -35,13 +35,13 @@ class SitkConverter:
 
     @property
     def target_type(self) -> type:
-        return sitk.Image  # type: ignore[no-any-return]
+        return sitk.Image
 
     def can_handle(self, obj: Any) -> bool:
         return isinstance(obj, sitk.Image)
 
     def extract_geometry(self, obj: Any) -> dict[str, Any]:
-        img: sitk.Image = obj
+        img: Any = obj
         ndim = img.GetDimension()
         spacing = img.GetSpacing()
         origin = img.GetOrigin()
@@ -54,15 +54,15 @@ class SitkConverter:
             "direction": direction,
         }
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
-        img: sitk.Image = obj
-        metadata: dict[str, Any] = {}
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
+        img: Any = obj
+        properties: dict[str, Any] = {}
         for key in img.GetMetaDataKeys():
-            metadata[key] = img.GetMetaData(key)
-        return metadata
+            properties[key] = img.GetMetaData(key)
+        return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
-        return sitk.GetArrayFromImage(obj)  # type: ignore[no-any-return]
+        return sitk.GetArrayFromImage(obj)
 
     def to_nrrd_bytes(self, obj: Any) -> bytes:
         from mitk_workbench_remote._io.nrrd import write_nrrd
@@ -73,11 +73,12 @@ class SitkConverter:
 
     def from_image(self, image: Any) -> sitk.Image:
         arr = image.array
-        sitk_image = sitk.GetImageFromArray(arr)
+        sitk_image: Any = sitk.GetImageFromArray(arr)
         sitk_image.SetSpacing(image.spacing)
         sitk_image.SetOrigin(image.origin)
         direction_flat = image.direction.flatten().tolist()
         sitk_image.SetDirection(direction_flat)
-        for key, value in image.metadata.items():
+        for key, value in image.properties.items():
             sitk_image.SetMetaData(key, str(value))
-        return sitk_image
+        result: sitk.Image = sitk_image
+        return result

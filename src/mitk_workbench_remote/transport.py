@@ -118,17 +118,17 @@ class RestResponse:
     @property
     def status_code(self) -> int:
         """HTTP status code."""
-        return self._response.status_code
+        return int(self._response.status_code)
 
     @property
     def ok(self) -> bool:
         """True for 2xx responses."""
-        return self._response.ok
+        return bool(self._response.ok)
 
     @property
     def content(self) -> bytes:
         """Raw response body as bytes."""
-        return self._response.content
+        return bytes(self._response.content)
 
     @property
     def text(self) -> str:
@@ -138,7 +138,7 @@ class RestResponse:
         charset auto-detection.  Use ``.content`` for endpoints that return
         binary data.
         """
-        return self._response.text
+        return str(self._response.text)
 
     @property
     def headers(self) -> dict[str, str]:

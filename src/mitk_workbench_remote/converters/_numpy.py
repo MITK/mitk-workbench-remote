@@ -38,7 +38,7 @@ class NumpyConverter:
     def extract_geometry(self, obj: Any) -> dict[str, Any]:
         return {}
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
         return {}
 
     def to_ndarray(self, obj: Any) -> np.ndarray:

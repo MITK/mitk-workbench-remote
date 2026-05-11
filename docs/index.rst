@@ -23,6 +23,7 @@ Quick example::
    :caption: Contents
 
    getting-started
+   interop-with-mitk
    api/index
    examples/index
    changelog

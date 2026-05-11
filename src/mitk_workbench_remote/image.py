@@ -45,8 +45,8 @@ class Image:
             Defaults to ``(0.0, ...)``.
         direction: Direction cosine matrix. Overrides converter-extracted values.
             Defaults to the identity matrix.
-        properties: Data-scope properties/metadata dict. If ``None`` and a converter
-            is used, metadata is extracted from the source object.
+        properties: Data-scope properties dict. If ``None`` and a converter
+            is used, properties are extracted from the source object.
     """
 
     def __init__(
@@ -78,7 +78,7 @@ class Image:
             self._source_data = data
             self._converter = converter
             geo_defaults = converter.extract_geometry(data)
-            properties_defaults = converter.extract_metadata(data)
+            properties_defaults = converter.extract_properties(data)
             # Need ndim: try to get from geometry, else materialize array
             if "spacing" in geo_defaults:
                 ndim = len(geo_defaults["spacing"])
@@ -201,9 +201,45 @@ class Image:
         return self.array.dtype
 
     @property
-    def metadata(self) -> dict[str, Any]:
-        """Data-scope metadata."""
-        return self._properties
+    def properties(self) -> dict[str, Any]:
+        """Data-scope properties dict."""
+        return dict(self._properties)
+
+    @property
+    def property_keys(self) -> list[str]:
+        """List of property keys."""
+        return list(self._properties.keys())
+
+    def get_property(self, key: str) -> Any:
+        """Get a property by key.
+
+        Args:
+            key: Property key.
+
+        Returns:
+            The property value, or ``None`` if not found.
+        """
+        return self._properties.get(key)
+
+    def set_property(self, key: str, value: Any) -> None:
+        """Set a property by key.
+
+        Args:
+            key: Property key.
+            value: Property value.
+        """
+        self._properties[key] = value
+
+    def remove_property(self, key: str) -> None:
+        """Remove a property by key.
+
+        Args:
+            key: Property key.
+
+        Raises:
+            KeyError: If the key does not exist.
+        """
+        del self._properties[key]
 
     # ------------------------------------------------------------------
     # Conversion methods
@@ -251,4 +287,33 @@ class Image:
         converter = find_converter_for_type(mlarray.MLArray)
         if converter is None:
             raise ImportError("MLArrayConverter is not registered")
+        return converter.from_image(self)
+
+    def to_mitk(self) -> Any:
+        """Convert to a ``mitk.Image`` (native MITK Python binding).
+
+        Requires the ``mitk`` package. Geometry and pixel data are copied
+        into the native image; properties are **not** transferred by this call
+        (use :meth:`DataNode.get_data` with ``include_properties=True`` or
+        :meth:`DataNode.set_data` with ``include_properties=True`` for metadata
+        round-tripping).
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for to_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+
+        import mitk as _mitk
+
+        from mitk_workbench_remote.converters import find_converter_for_type
+
+        converter = find_converter_for_type(_mitk.Image)
+        if converter is None:
+            raise ImportError("MitkImageConverter is not registered")
         return converter.from_image(self)

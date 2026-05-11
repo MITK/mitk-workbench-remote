@@ -389,13 +389,13 @@ def test_launch_returns_workbench_with_process(tmp_path: Path) -> None:
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
-        patch("subprocess.run"),
+        patch("subprocess.run", return_value=MagicMock(returncode=0)),
     ):
         wb = launch(exe, port=port, token="tok", timeout=5.0)
 
     assert isinstance(wb, Workbench)
     # Verify it is a launched instance via public behaviour: shutdown() must not raise
-    with patch("subprocess.run"):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
         wb.shutdown()  # also closes transport
 
 
@@ -598,7 +598,7 @@ def test_shutdown_wrapper_kills_both_listener_and_wrapper(tmp_path: Path) -> Non
     def _run_side_effect(cmd, **kwargs):
         if cmd[0] == "netstat":
             return mock_netstat
-        return MagicMock()  # taskkill
+        return MagicMock(returncode=0)  # taskkill
 
     with (
         patch("subprocess.Popen", return_value=mock_proc),
@@ -650,7 +650,7 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
     def _run_side_effect(cmd, **kwargs):
         if cmd[0] == "netstat":
             return mock_netstat
-        return MagicMock()  # taskkill
+        return MagicMock(returncode=0)  # taskkill
 
     with (
         patch("subprocess.Popen", return_value=mock_proc),

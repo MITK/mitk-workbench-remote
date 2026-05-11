@@ -20,6 +20,24 @@
 
 Converts between raw NRRD bytes and Image objects, handling spatial properties
 (space, space directions, space origin) from the NRRD header.
+
+Axis ordering
+-------------
+pynrrd's ``index_order`` parameter controls how numpy array axes map to NRRD
+dimensions.  We use ``index_order='C'`` throughout this module so that numpy
+axis 0 is the slowest-varying dimension (z in a 3-D image) -- the standard
+C-order / row-major convention.
+
+This matches the axis convention used by ``mitk.Image.from_numpy`` /
+``mitk.Image.as_numpy`` in the MITK Python bindings (pybind11), which also
+treat numpy axis 0 as the slowest-varying spatial dimension.  Without this
+alignment, NRRD files written by ``mitk.IOUtil.save`` would produce transposed
+arrays when read back through pynrrd (and vice-versa), because pynrrd's
+default ``index_order='F'`` treats axis 0 as the *fastest*-varying dimension.
+
+The ``index_order`` must be the same for reading and writing; mixing
+conventions silently transposes data.  All call sites in this module and in
+``multilabel_nrrd.py`` therefore use the shared ``_INDEX_ORDER`` constant.
 """
 
 from __future__ import annotations
@@ -27,7 +45,7 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import nrrd
 import numpy as np
@@ -42,6 +60,9 @@ _KINDS = "kinds"
 
 # MITK convention: left-posterior-superior
 _MITK_SPACE = "left-posterior-superior"
+
+# Axis ordering for pynrrd read/write -- see module docstring for rationale.
+_INDEX_ORDER: Literal["C", "F"] = "C"
 
 
 def read_nrrd(source: bytes | str | Path) -> Any:
@@ -58,13 +79,13 @@ def read_nrrd(source: bytes | str | Path) -> Any:
     if isinstance(source, bytes):
         buf = io.BytesIO(source)
         header = nrrd.read_header(buf)
-        data = nrrd.read_data(header, buf, None)
+        data = nrrd.read_data(header, buf, None, index_order=_INDEX_ORDER)
     else:
-        data, header = nrrd.read(str(source))
+        data, header = nrrd.read(str(source), index_order=_INDEX_ORDER)
 
     ndim = _spatial_ndim(header, data.ndim)
     spacing, origin, direction = _extract_spatial(header, ndim)
-    metadata = _extract_custom_metadata(header)
+    metadata = _extract_custom_properties(header)
 
     _log.debug("read_nrrd: shape=%s dtype=%s", data.shape, data.dtype)
     return Image(
@@ -89,16 +110,16 @@ def write_nrrd(image: Any, path: str | Path | None = None) -> bytes:
     """
     _log.debug("write_nrrd: shape=%s dtype=%s", image.array.shape, image.array.dtype)
     header = _build_header(image)
-    _write_custom_metadata(header, image.metadata)
+    _write_custom_properties(header, image.properties)
     arr = image.array
 
     if path is not None:
-        nrrd.write(str(path), arr, header)
+        nrrd.write(str(path), arr, header, index_order=_INDEX_ORDER)
         return Path(path).read_bytes()
 
     # Write to memory buffer
     buf = io.BytesIO()
-    nrrd.write(buf, arr, header)
+    nrrd.write(buf, arr, header, index_order=_INDEX_ORDER)
     return buf.getvalue()
 
 
@@ -184,7 +205,7 @@ def _build_header(image: Any) -> dict[str, Any]:
     return header
 
 
-def _extract_custom_metadata(header: dict[str, Any]) -> dict[str, Any]:
+def _extract_custom_properties(header: dict[str, Any]) -> dict[str, Any]:
     """Extract custom key-value fields from the NRRD header.
 
     pynrrd stores custom `:=` fields in the header alongside standard fields.
@@ -231,29 +252,29 @@ def _extract_custom_metadata(header: dict[str, Any]) -> dict[str, Any]:
         "space units",
         "measurement frame",
     }
-    metadata: dict[str, Any] = {}
+    properties: dict[str, Any] = {}
     for key, value in header.items():
         if key.lower() not in standard_keys:
-            metadata[key] = value
-    return metadata
+            properties[key] = value
+    return properties
 
 
-def _write_custom_metadata(header: dict[str, Any], metadata: dict[str, Any]) -> None:
+def _write_custom_properties(header: dict[str, Any], properties: dict[str, Any]) -> None:
     """Write properties dict as custom fields in the NRRD header.
 
     Args:
         header: NRRD header dict to modify in-place.
-        metadata: Custom key-value pairs to add.
+        properties: Custom key-value pairs to add.
 
     Raises:
-        ValueError: If any metadata key conflicts with a standard NRRD header field
+        ValueError: If any properties key conflicts with a standard NRRD header field
             already present in *header*.
     """
-    conflicts = [k for k in metadata if k in header]
+    conflicts = [k for k in properties if k in header]
     if conflicts:
         raise ValueError(
-            f"Metadata keys conflict with standard NRRD header fields: {conflicts!r}."
-            " Remove these keys from the image metadata before writing."
+            f"Properties keys conflict with standard NRRD header fields: {conflicts!r}."
+            " Remove these keys from the image properties before writing."
         )
-    for key, value in metadata.items():
+    for key, value in properties.items():
         header[key] = value

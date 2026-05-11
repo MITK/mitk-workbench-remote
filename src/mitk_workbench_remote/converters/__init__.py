@@ -52,8 +52,8 @@ class ImageConverter(Protocol):
         """Extract spatial geometry (spacing, origin, direction) from the object."""
         ...
 
-    def extract_metadata(self, obj: Any) -> dict[str, Any]:
-        """Extract custom properties/properties from the object."""
+    def extract_properties(self, obj: Any) -> dict[str, Any]:
+        """Extract custom properties from the object."""
         ...
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
@@ -125,5 +125,12 @@ try:
     from mitk_workbench_remote.converters._mlarray import MLArrayConverter
 
     register_converter(MLArrayConverter())
+except ImportError:
+    pass
+
+try:
+    from mitk_workbench_remote.converters._mitk import MitkImageConverter
+
+    register_converter(MitkImageConverter())
 except ImportError:
     pass
