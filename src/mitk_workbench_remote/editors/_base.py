@@ -37,6 +37,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from mitk_workbench_remote.errors import EditorNotActiveError
 from mitk_workbench_remote.node import PropertyScope
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import ScreenshotFormat
@@ -451,8 +452,18 @@ class EditorBase:
     # ------------------------------------------------------------------
 
     def get_info(self) -> EditorInfo:
-        """Fetch the editor's metadata (always live)."""
-        body = self._transport.get(f"/rendering/editors/{self.ALIAS}").json()
+        """Fetch the editor's metadata (always live).
+
+        Returns a degraded ``EditorInfo`` with ``active=False`` and empty
+        ``windows`` when the editor exists but no instance is open
+        (server signals ``EDITOR_NOT_ACTIVE``). A missing Qt render-window
+        bridge (``RENDER_WINDOW_NOT_AVAILABLE``) is a deployment-level
+        problem and still surfaces as :class:`RenderingError`.
+        """
+        try:
+            body = self._transport.get(f"/rendering/editors/{self.ALIAS}").json()
+        except EditorNotActiveError:
+            return EditorInfo(alias=self.ALIAS, plugin_id="", active=False, windows=())
         return _editor_info_from_json(body)
 
     @property

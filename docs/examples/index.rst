@@ -13,3 +13,6 @@ API enabled.
    03_multilabel_segmentation
    04_show_and_rendering
    05_discovery_and_launch
+   06_std_multi_editor
+   07_mxn_multimodal_layouts
+   08_cohort_screenshot_factory

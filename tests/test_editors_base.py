@@ -309,6 +309,48 @@ def test_inactive_editor_raises_editor_not_active() -> None:
     assert excinfo.value.alias == "stdmulti"
 
 
+@responses.activate
+def test_get_info_returns_degraded_info_when_editor_not_active() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/editors/stdmulti"),
+        json={
+            "error": {
+                "type": "https://docs.mitk.org/api/errors/EDITOR_NOT_ACTIVE",
+                "code": "EDITOR_NOT_ACTIVE",
+                "title": "Editor Not Active",
+                "message": "StdMultiWidgetEditor is not open",
+                "status": 503,
+            }
+        },
+        status=503,
+    )
+    editor = StdMultiEditor(_transport())
+    info = editor.get_info()
+    assert info.alias == "stdmulti"
+    assert info.active is False
+    assert info.windows == ()
+
+
+@responses.activate
+def test_is_active_returns_false_when_editor_not_active() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/editors/stdmulti"),
+        json={
+            "error": {
+                "code": "EDITOR_NOT_ACTIVE",
+                "title": "Editor Not Active",
+                "message": "StdMultiWidgetEditor is not open",
+                "status": 503,
+            }
+        },
+        status=503,
+    )
+    editor = StdMultiEditor(_transport())
+    assert editor.is_active is False
+
+
 # ---------------------------------------------------------------------------
 # EditorBase: list / iter / __getitem__
 # ---------------------------------------------------------------------------
