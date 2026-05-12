@@ -283,7 +283,6 @@ class MultiLabelSegmentation:
         direction: Sequence[Any] | np.ndarray | None = None,
         properties: dict[str, Any] | None = None,
         _shape: tuple[int, ...] | None = None,
-        _dtype: Any = LABEL_DTYPE,
     ) -> None:
         # Resolve group images list
         if group_images is None:
@@ -311,7 +310,6 @@ class MultiLabelSegmentation:
         self._labels: dict[int, Label] = dict(labels)
         self._group_images: list[Any] = imgs
         self._properties: dict[str, Any] = properties if properties is not None else {}
-        self._dtype: np.dtype = np.dtype(_dtype)
 
         # Normalize geometry (always 3D spatial)
         self._spacing = _normalize_spacing(spacing, ndim=3)
@@ -354,7 +352,6 @@ class MultiLabelSegmentation:
         spacing: Sequence[float] | None = None,
         origin: Sequence[float] | None = None,
         direction: np.ndarray | None = None,
-        dtype: Any = LABEL_DTYPE,
     ) -> MultiLabelSegmentation:
         """Create a new empty segmentation.
 
@@ -368,8 +365,6 @@ class MultiLabelSegmentation:
             spacing: Override spacing (defaults to reference geometry or (1, 1, 1)).
             origin: Override origin (defaults to reference geometry or (0, 0, 0)).
             direction: Override direction (defaults to reference geometry or identity).
-            dtype: Numpy dtype for lazily allocated group images. Defaults to
-                ``LABEL_DTYPE`` (``uint16``), which is required by MITK.
 
         Returns:
             A new :class:`MultiLabelSegmentation` with no pixel data.
@@ -400,7 +395,6 @@ class MultiLabelSegmentation:
             origin=eff_origin,
             direction=eff_direction,
             _shape=actual_shape,
-            _dtype=np.dtype(dtype),
         )
 
     # ------------------------------------------------------------------
@@ -730,7 +724,7 @@ class MultiLabelSegmentation:
                     "Cannot create group image: shape is unknown. "
                     "Use set_group_image() first, or create with shape= or reference=."
                 )
-            arr = np.zeros(self._shape, dtype=self._dtype)
+            arr = np.zeros(self._shape, dtype=LABEL_DTYPE)
             self._group_images[index] = Image(
                 arr,
                 spacing=self._spacing,
@@ -879,7 +873,6 @@ class MultiLabelSegmentation:
         arrays: list[np.ndarray] = []
         for img in self._group_images:
             if img is None:
-                # intentional: enforce MITK uint16 contract, not self._dtype
                 arrays.append(np.zeros(shape, dtype=LABEL_DTYPE))
             else:
                 arrays.append(img.array)

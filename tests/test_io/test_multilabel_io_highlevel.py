@@ -214,7 +214,7 @@ def test_seg_and_image_align_in_world_space_after_io_roundtrip() -> None:
     spacing = (0.5, 1.0, 2.0)  # (sx, sy, sz)
     img = Image(img_arr, spacing=spacing, origin=(0.0, 0.0, 0.0))
 
-    seg = MultiLabelSegmentation.create(reference=img, dtype=LABEL_DTYPE)
+    seg = MultiLabelSegmentation.create(reference=img)
     seg.add_label(Label(1, "spot", color=(1.0, 0.0, 0.0)), group=seg.add_group("G"))
     seg_arr = np.zeros(img.shape, dtype=LABEL_DTYPE)
     seg_arr[1, 2, 3] = 1  # SAME numpy index as the image voxel

@@ -606,11 +606,6 @@ def test_label_dtype_constant_is_uint16() -> None:
     assert np.dtype(np.uint16) == LABEL_DTYPE
 
 
-def test_create_default_dtype_is_label_dtype() -> None:
-    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
-    assert seg._dtype == LABEL_DTYPE
-
-
 def test_get_group_image_lazy_alloc_dtype_is_label_dtype() -> None:
     seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
     g = seg.add_group("G")

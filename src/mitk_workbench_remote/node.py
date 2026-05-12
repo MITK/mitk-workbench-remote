@@ -21,6 +21,7 @@ from __future__ import annotations
 import html as _html
 import json
 import logging
+import shutil
 import tempfile
 from enum import Enum
 from pathlib import Path
@@ -851,20 +852,19 @@ class DataNode:
             import mitk
 
             if isinstance(data, mitk.MultiLabelSegmentation):
-                tmp_path: Path | None = None
+                # MITK resolves the MultiLabelSegmentation writer via a MIME
+                # type whose AppliesTo() inspects the file header when the
+                # path exists. We need a path that does not yet exist; create
+                # a private directory and let .save populate a deterministic
+                # name inside it. This avoids the TOCTOU window of
+                # unlink-then-save on a shared /tmp.
+                tmp_dir = Path(tempfile.mkdtemp(prefix="mw_mitk_seg_"))
                 try:
-                    with tempfile.NamedTemporaryFile(suffix=".nrrd", delete=False) as tmp:
-                        tmp_path = Path(tmp.name)
-                    # MITK resolves the MultiLabelSegmentation writer via a
-                    # MIME type whose AppliesTo() inspects the file header when
-                    # the path exists. Remove the empty placeholder so writer
-                    # selection does not reject based on an empty modality.
-                    tmp_path.unlink()
+                    tmp_path = tmp_dir / "data.nrrd"
                     data.save(str(tmp_path))
                     return tmp_path.read_bytes()
                 finally:
-                    if tmp_path is not None:
-                        tmp_path.unlink(missing_ok=True)
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
         except ImportError:
             pass
 

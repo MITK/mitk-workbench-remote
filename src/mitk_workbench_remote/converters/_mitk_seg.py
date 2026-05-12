@@ -25,6 +25,7 @@ call mitk.IOUtil directly.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -99,17 +100,15 @@ class MitkSegmentationConverter:
 
         from mitk_workbench_remote import _io
 
-        tmp_path: Path | None = None
+        # MITK resolves the MultiLabelSegmentation writer via a MIME type whose
+        # AppliesTo() inspects the file header when the path exists. We need a
+        # path that does *not* exist yet; create a private directory and let
+        # mitk.IOUtil.save populate a deterministic name inside it. This avoids
+        # the TOCTOU window of unlink-then-save on a shared /tmp.
+        tmp_dir = Path(tempfile.mkdtemp(prefix="mw_mitk_seg_"))
         try:
-            with tempfile.NamedTemporaryFile(suffix=".nrrd", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
-            # MITK resolves the MultiLabelSegmentation writer via a MIME type
-            # whose AppliesTo() inspects the file header when the path exists.
-            # Remove the empty placeholder so writer selection does not reject
-            # based on an empty modality field.
-            tmp_path.unlink()
+            tmp_path = tmp_dir / "data.nrrd"
             mitk.IOUtil.save(mitk_seg, str(tmp_path))
             return _io.read_multilabel_nrrd(tmp_path.read_bytes())
         finally:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
