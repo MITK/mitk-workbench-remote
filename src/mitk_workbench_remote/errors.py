@@ -96,6 +96,79 @@ class RenderingError(MitkError):
     """Raised when the server returns RENDERING_ERROR (HTTP 422)."""
 
 
+class EditorNotActiveError(MitkError):
+    """Raised when the addressed editor is not currently open in the workbench.
+
+    Surfaces server code ``EDITOR_NOT_ACTIVE`` (HTTP 503).
+
+    Args:
+        alias: Editor alias addressed by the call (e.g. ``"stdmulti"``, ``"mxn"``).
+        message: Human-readable error message from the response body.
+    """
+
+    def __init__(self, alias: str, message: str | None = None) -> None:
+        self.alias = alias
+        super().__init__(message or f"Editor {alias!r} is not active")
+
+
+class RenderWindowNotFoundError(MitkError):
+    """Raised when an editor does not know the addressed render window id.
+
+    Surfaces server code ``RENDER_WINDOW_NOT_FOUND`` (HTTP 404).
+
+    Args:
+        editor_alias: Editor alias addressed by the call. May be an empty
+            string when the URL did not carry editor context.
+        window_id: Render window id (URL segment) that was not found.
+        message: Human-readable error message from the response body.
+    """
+
+    def __init__(
+        self,
+        editor_alias: str,
+        window_id: str,
+        message: str | None = None,
+    ) -> None:
+        self.editor_alias = editor_alias
+        self.window_id = window_id
+        if message is None:
+            scope = f"{editor_alias!r} editor" if editor_alias else "editor"
+            message = f"No render window {window_id!r} in {scope}"
+        super().__init__(message)
+
+
+class UnsupportedOperationError(MitkError):
+    """Raised when a sub-resource does not apply to the addressed window.
+
+    Surfaces server code ``UNSUPPORTED_OPERATION`` (HTTP 404). The canonical
+    example is ``selected-slice`` on the StdMulti 3D window.
+
+    Args:
+        editor_alias: Editor alias addressed by the call.
+        window_id: Render window id addressed by the call.
+        operation: Short label for the rejected sub-resource (e.g.
+            ``"selected-slice"``).
+        message: Human-readable error message from the response body.
+    """
+
+    def __init__(
+        self,
+        editor_alias: str,
+        window_id: str,
+        operation: str,
+        message: str | None = None,
+    ) -> None:
+        self.editor_alias = editor_alias
+        self.window_id = window_id
+        self.operation = operation
+        if message is None:
+            message = (
+                f"{operation!r} is not applicable to window {window_id!r} "
+                f"of editor {editor_alias!r}"
+            )
+        super().__init__(message)
+
+
 class ApiError(MitkError):
     """Catch-all for 4xx/5xx responses not covered by a more specific type.
 
