@@ -1228,6 +1228,7 @@ def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
 @responses.activate
 def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
     """as_type=MITK propagates ImportError when mitk is not installed."""
+    import sys
     from unittest.mock import patch
 
     node = _make_direct_node()
@@ -1240,10 +1241,7 @@ def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
         content_type="application/octet-stream",
     )
 
-    with (
-        patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")),
-        pytest.raises(ImportError),
-    ):
+    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
         node.get_data(as_type=DataRepresentation.MITK)
 
 

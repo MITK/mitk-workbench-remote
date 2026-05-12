@@ -258,18 +258,18 @@ def test_to_segmentation_cleans_up_tempfile() -> None:
     mitk_seg = _make_mitk_seg()
 
     captured: list[Path] = []
-    original_ntf = tempfile.NamedTemporaryFile
+    original_mkdtemp = tempfile.mkdtemp
 
-    def tracking_ntf(*args: object, **kwargs: object) -> object:
-        ctx = original_ntf(*args, **kwargs)
-        captured.append(Path(ctx.name))
-        return ctx
+    def tracking_mkdtemp(*args: object, **kwargs: object) -> str:
+        path = original_mkdtemp(*args, **kwargs)
+        captured.append(Path(path))
+        return path
 
-    with patch.object(tempfile, "NamedTemporaryFile", side_effect=tracking_ntf):
+    with patch.object(tempfile, "mkdtemp", side_effect=tracking_mkdtemp):
         converter.to_segmentation(mitk_seg)
 
-    assert captured, "NamedTemporaryFile was never called"
-    assert not captured[0].exists(), "Temp file was not cleaned up"
+    assert captured, "mkdtemp was never called"
+    assert not captured[0].exists(), "Temp directory was not cleaned up"
 
 
 # ---------------------------------------------------------------------------

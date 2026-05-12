@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 import nrrd
 import numpy as np
 
-from mitk_workbench_remote._io.nrrd import _MITK_SPACE, _extract_spatial
+from mitk_workbench_remote._io.nrrd import _MITK_SPACE, _extract_spatial, _write_custom_properties
 
 # Multilabel NRRD uses F-order so that numpy axis 0 (groups) maps directly to
 # NRRD dim 0 (fastest-varying).  This matches MITK's C++ NRRD writer, which
@@ -235,8 +235,7 @@ def write_multilabel_nrrd_raw(
     header[_MODALITY_KEY] = _MODALITY_VALUE
 
     if properties:
-        for key, value in properties.items():
-            header[key] = value
+        _write_custom_properties(header, properties)
 
     # In-memory is [groups, Z, Y, X]; wire is the F-ordered [groups, X, Y, Z]
     # MITK expects. Flip the spatial axes immediately before pynrrd.
@@ -386,7 +385,7 @@ def read_multilabel_nrrd(source: bytes | str | Path) -> MultiLabelSegmentation:
         group, group_labels = _labelgroup_from_dict(group_dict)
         groups.append(group)
         for label in group_labels:
-            # _labelgroup_from_dict guarantees label.value is not None.
+            # _labelgroup_from_dict raises if label.value is None; narrows for mypy.
             assert label.value is not None
             labels_dict[label.value] = label
         group_images.append(
