@@ -375,6 +375,22 @@ def test_get_group_labels() -> None:
     assert names == {"A", "B"}
 
 
+def test_labels_property_raises_on_label_with_none_value() -> None:
+    # ``add_label`` always assigns a value before storing, so a label with
+    # ``value=None`` in ``_labels`` is internal-state corruption. The sort
+    # accessor must surface that loudly rather than aliasing it onto the
+    # reserved UNLABELED_VALUE (0).
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    # Force the corrupt state by mutating an entry's underlying value back
+    # to None. Public API never lets this happen, but the sort accessor must
+    # still fail loudly if it does.
+    next(iter(seg._labels.values()))._value = None  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="value=None"):
+        _ = seg.labels
+
+
 # ===========================================================================
 # get_group_image
 # ===========================================================================
@@ -590,11 +606,6 @@ def test_label_dtype_constant_is_uint16() -> None:
     assert np.dtype(np.uint16) == LABEL_DTYPE
 
 
-def test_create_default_dtype_is_label_dtype() -> None:
-    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
-    assert seg._dtype == LABEL_DTYPE
-
-
 def test_get_group_image_lazy_alloc_dtype_is_label_dtype() -> None:
     seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
     g = seg.add_group("G")
@@ -666,3 +677,100 @@ def test_compose_array_mixed_sources_dtype_is_label_dtype() -> None:
     seg.add_group("G1")
     composed = seg._compose_array()
     assert composed.dtype == LABEL_DTYPE
+
+
+# ===========================================================================
+# to_mitk / from_mitk (require mitk package)
+# ===========================================================================
+
+
+class TestMitkInterop:
+    """Tests for MultiLabelSegmentation.to_mitk() and from_mitk()."""
+
+    @pytest.fixture(autouse=True)
+    def require_mitk(self) -> None:
+        pytest.importorskip("mitk")
+
+    def _make_seg(self) -> MultiLabelSegmentation:
+        seg = MultiLabelSegmentation.create(
+            shape=(4, 5, 6), spacing=(1.0, 2.0, 3.0), origin=(10.0, 20.0, 30.0)
+        )
+        g0 = seg.add_group("Anatomy")
+        seg.add_label(Label(1, "Liver", color=(0.8, 0.4, 0.1)), group=g0)
+        seg.add_label(Label(2, "Spleen", color=(0.3, 0.6, 0.8)), group=g0)
+        g1 = seg.add_group("Findings")
+        seg.add_label(Label(3, "Tumor", color=(1.0, 0.1, 0.1), locked=True), group=g1)
+        img0 = seg.get_group_image(0)
+        img0.array[0, 0, 0] = 1
+        img0.array[1, 1, 1] = 2
+        img1 = seg.get_group_image(1)
+        img1.array[2, 2, 2] = 3
+        return seg
+
+    def test_to_mitk_returns_mitk_mls(self) -> None:
+        import mitk
+
+        result = self._make_seg().to_mitk()
+        assert isinstance(result, mitk.MultiLabelSegmentation)
+
+    def test_to_mitk_preserves_groups(self) -> None:
+        result = self._make_seg().to_mitk()
+        assert result.num_groups == 2
+
+    def test_to_mitk_preserves_labels(self) -> None:
+        result = self._make_seg().to_mitk()
+        values = sorted(int(v) for v in result.label_values if int(v) != 0)
+        assert values == [1, 2, 3]
+        names = {int(lbl.value): lbl.name for lbl in result.labels}
+        assert names[1] == "Liver"
+        assert names[3] == "Tumor"
+
+    def test_to_mitk_preserves_pixels(self) -> None:
+        result = self._make_seg().to_mitk()
+        arr0 = np.asarray(result.get_group_image(0), copy=False)
+        assert int(arr0[0, 0, 0]) == 1
+        assert int(arr0[1, 1, 1]) == 2
+        arr1 = np.asarray(result.get_group_image(1), copy=False)
+        assert int(arr1[2, 2, 2]) == 3
+
+    def test_to_mitk_preserves_geometry(self) -> None:
+        result = self._make_seg().to_mitk()
+        np.testing.assert_allclose(result.spacing, (1.0, 2.0, 3.0), rtol=1e-5)
+        np.testing.assert_allclose(result.origin, (10.0, 20.0, 30.0), rtol=1e-5)
+
+    def test_to_mitk_raises_importerror_when_mitk_absent(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        seg = self._make_seg()
+        with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError, match="mitk"):
+            seg.to_mitk()
+
+    def test_from_mitk_returns_mw_mls(self) -> None:
+
+        seg = self._make_seg()
+        mitk_seg = seg.to_mitk()
+        result = MultiLabelSegmentation.from_mitk(mitk_seg)
+        assert isinstance(result, MultiLabelSegmentation)
+
+    def test_from_mitk_preserves_structure(self) -> None:
+        seg = self._make_seg()
+        mitk_seg = seg.to_mitk()
+        result = MultiLabelSegmentation.from_mitk(mitk_seg)
+
+        assert len(result.groups) == 2
+        values = sorted(lbl.value for lbl in result.labels)
+        assert values == [1, 2, 3]
+        arr0 = result.get_group_image(0).array
+        assert int(arr0[0, 0, 0]) == 1
+        assert int(arr0[1, 1, 1]) == 2
+        np.testing.assert_allclose(result.spacing, (1.0, 2.0, 3.0), rtol=1e-5)
+
+    def test_from_mitk_raises_importerror_when_mitk_absent(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        seg = self._make_seg()
+        mitk_seg = seg.to_mitk()
+        with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError, match="mitk"):
+            MultiLabelSegmentation.from_mitk(mitk_seg)

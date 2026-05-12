@@ -122,6 +122,70 @@ def test_roundtrip_file(tmp_path: Path) -> None:
     np.testing.assert_array_equal(data, arr)
 
 
+def test_roundtrip_preserves_asymmetric_non_cubic_voxels() -> None:
+    """Round-trip a non-cubic shape with asymmetric voxel positions.
+
+    Regression test for the multilabel-NRRD axis-order bug: with a
+    cubic shape OR symmetric voxel positions like ``arr[i, i, i]`` an
+    accidental spatial-axis swap is invisible. This test fixes both:
+    the spatial dims have three distinct sizes, and each label voxel
+    sits at a different ``(k, j, i)`` triple, so any axis swap during
+    write/read changes which value lands at which numpy index.
+    """
+    arr = np.zeros((1, 4, 5, 6), dtype=np.uint16)
+    arr[0, 0, 1, 2] = 11
+    arr[0, 1, 2, 3] = 22
+    arr[0, 2, 3, 4] = 33
+    arr[0, 3, 4, 5] = 44
+    nrrd_bytes = write_multilabel_nrrd_raw(
+        arr,
+        [],
+        spacing=(0.5, 1.0, 2.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+    )
+    data, _groups2, spatial = read_multilabel_nrrd_raw(nrrd_bytes)
+    assert data.shape == arr.shape
+    np.testing.assert_array_equal(data, arr)
+    # Spacing keeps its (sx, sy, sz) world-axis order on the way out.
+    assert spatial["spacing"] == (0.5, 1.0, 2.0)
+
+
+def test_wire_format_uses_xyz_spatial_order_per_mitk_contract() -> None:
+    """The on-disk NRRD must remain in MITK's ``[X, Y, Z]`` spatial order.
+
+    MITK's C++ ``LabelSetImageIO`` writes (and expects to read)
+    ``sizes = [num_groups, X, Y, Z]`` with the first space direction
+    entry being the X-axis. This test pins that wire layout so any
+    future refactor of the writer keeps producing files MITK can load.
+    """
+    import io
+
+    import nrrd
+
+    # Three distinct spatial sizes so X / Y / Z are unambiguous on the wire.
+    arr = np.zeros((2, 4, 5, 6), dtype=np.uint16)
+    nrrd_bytes = write_multilabel_nrrd_raw(
+        arr,
+        [],
+        spacing=(0.5, 1.0, 2.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+    )
+    header = nrrd.read_header(io.BytesIO(nrrd_bytes))
+    # Wire spatial sizes are in (X, Y, Z) order matching the spacing tuple.
+    # arr's spatial shape is (4, 5, 6) which is the in-memory (Z, Y, X)
+    # layout; on the wire that becomes (X=6, Y=5, Z=4).
+    assert list(header["sizes"]) == [2, 6, 5, 4]
+    assert header["kinds"] == ["vector", "domain", "domain", "domain"]
+    space_dirs = np.asarray(header["space directions"])
+    # Vector axis = nan. Spatial entries are X/Y/Z directions scaled by sx/sy/sz.
+    assert np.all(np.isnan(space_dirs[0]))
+    np.testing.assert_allclose(space_dirs[1], (0.5, 0.0, 0.0))
+    np.testing.assert_allclose(space_dirs[2], (0.0, 1.0, 0.0))
+    np.testing.assert_allclose(space_dirs[3], (0.0, 0.0, 2.0))
+
+
 def test_4d_space_directions_has_nan_for_vector_axis() -> None:
     """The first space direction entry should be NaN (vector/group axis)."""
     import io

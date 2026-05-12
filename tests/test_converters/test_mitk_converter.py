@@ -23,12 +23,14 @@ import pytest
 
 mitk = pytest.importorskip("mitk")
 
-from mitk_workbench_remote.converters import (  # noqa: E402
+from mitk_workbench_remote.converters import (  # noqa: E402  -- requires `mitk`
     find_converter_for_type,
     find_image_converter,
 )
-from mitk_workbench_remote.converters._mitk import MitkImageConverter  # noqa: E402
-from mitk_workbench_remote.image import Image  # noqa: E402
+from mitk_workbench_remote.converters._mitk import (  # noqa: E402  -- requires `mitk`
+    MitkImageConverter,
+)
+from mitk_workbench_remote.image import Image  # noqa: E402  -- requires `mitk`
 
 _OBLIQUE = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
 

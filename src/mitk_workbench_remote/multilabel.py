@@ -270,10 +270,6 @@ class MultiLabelSegmentation:
         ValueError: On shape/geometry inconsistency or duplicate/missing label IDs.
     """
 
-    # TODO(WP-11): Add to_mitk() once mitk.MultiLabelSegmentation is wrapped and
-    # MitkSegmentationConverter is implemented. The C++ side already has
-    # InitMultiLabelSegmentation (Module.cpp:31). See MITK_Interoperability_Design.md §WP-11.
-
     UNLABELED_VALUE: int = 0
 
     def __init__(
@@ -287,7 +283,6 @@ class MultiLabelSegmentation:
         direction: Sequence[Any] | np.ndarray | None = None,
         properties: dict[str, Any] | None = None,
         _shape: tuple[int, ...] | None = None,
-        _dtype: Any = LABEL_DTYPE,
     ) -> None:
         # Resolve group images list
         if group_images is None:
@@ -315,7 +310,6 @@ class MultiLabelSegmentation:
         self._labels: dict[int, Label] = dict(labels)
         self._group_images: list[Any] = imgs
         self._properties: dict[str, Any] = properties if properties is not None else {}
-        self._dtype: np.dtype = np.dtype(_dtype)
 
         # Normalize geometry (always 3D spatial)
         self._spacing = _normalize_spacing(spacing, ndim=3)
@@ -358,7 +352,6 @@ class MultiLabelSegmentation:
         spacing: Sequence[float] | None = None,
         origin: Sequence[float] | None = None,
         direction: np.ndarray | None = None,
-        dtype: Any = LABEL_DTYPE,
     ) -> MultiLabelSegmentation:
         """Create a new empty segmentation.
 
@@ -372,8 +365,6 @@ class MultiLabelSegmentation:
             spacing: Override spacing (defaults to reference geometry or (1, 1, 1)).
             origin: Override origin (defaults to reference geometry or (0, 0, 0)).
             direction: Override direction (defaults to reference geometry or identity).
-            dtype: Numpy dtype for lazily allocated group images. Defaults to
-                ``LABEL_DTYPE`` (``uint16``), which is required by MITK.
 
         Returns:
             A new :class:`MultiLabelSegmentation` with no pixel data.
@@ -404,7 +395,6 @@ class MultiLabelSegmentation:
             origin=eff_origin,
             direction=eff_direction,
             _shape=actual_shape,
-            _dtype=np.dtype(dtype),
         )
 
     # ------------------------------------------------------------------
@@ -418,11 +408,25 @@ class MultiLabelSegmentation:
 
     @property
     def labels(self) -> list[Label]:
-        """All Label objects across all groups, sorted by value."""
-        # _labels is keyed by assigned integer values, so label.value is never None here.
-        return sorted(
-            self._labels.values(), key=lambda label: -1 if label.value is None else label.value
-        )
+        """All Label objects across all groups, sorted by value.
+
+        Raises:
+            ValueError: If any label still has ``value is None``. By
+                construction, ``add_label`` assigns a value before storing,
+                so a ``None`` here indicates internal-state corruption —
+                aliasing it onto the reserved ``UNLABELED_VALUE`` (0) would
+                hide a real bug.
+        """
+
+        def _key(label: Label) -> int:
+            if label.value is None:
+                raise ValueError(
+                    f"Label {label!r} has value=None — labels stored on a "
+                    "MultiLabelSegmentation must have a non-None value (>= 1)."
+                )
+            return label.value
+
+        return sorted(self._labels.values(), key=_key)
 
     @property
     def spacing(self) -> tuple[float, ...]:
@@ -479,6 +483,69 @@ class MultiLabelSegmentation:
             KeyError: If the key does not exist.
         """
         del self._properties[key]
+
+    # ------------------------------------------------------------------
+    # MITK interop
+    # ------------------------------------------------------------------
+
+    def to_mitk(self) -> Any:
+        """Convert to a ``mitk.MultiLabelSegmentation`` (native MITK Python binding).
+
+        Requires the ``mitk`` package, which is typically only available inside
+        a MITK-provided Python environment. Geometry, pixel data, and all label
+        metadata (groups, labels, colors, lock state, etc.) are transferred via
+        NRRD round-trip.
+
+        Note: data-scope properties stored in :attr:`properties` are **not**
+        transferred, because the remote library's NRRD writer does not embed
+        arbitrary properties. For a full round-trip including data-scope
+        properties, use :meth:`DataNode.get_data` /
+        :meth:`DataNode.set_data` with ``as_type=DataRepresentation.MITK``.
+
+        Returns:
+            A ``mitk.MultiLabelSegmentation`` instance.
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for to_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+        from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
+
+        return MitkSegmentationConverter().from_segmentation(self)
+
+    @classmethod
+    def from_mitk(cls, mitk_seg: Any) -> MultiLabelSegmentation:
+        """Create from a ``mitk.MultiLabelSegmentation`` (native MITK Python binding).
+
+        Geometry, pixel data, and all label metadata are transferred via NRRD
+        round-trip.
+
+        Args:
+            mitk_seg: A native MITK MultiLabelSegmentation object.
+
+        Returns:
+            A new :class:`MultiLabelSegmentation` instance.
+
+        Raises:
+            ImportError: If ``mitk`` is not installed.
+        """
+        try:
+            import mitk  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'mitk' package is required for from_mitk(). "
+                "It is available when using MITK's Python environment."
+            ) from None
+        from mitk_workbench_remote.converters._mitk_seg import MitkSegmentationConverter
+
+        result: MultiLabelSegmentation = MitkSegmentationConverter().to_segmentation(mitk_seg)
+        return result
 
     # ------------------------------------------------------------------
     # Lookup
@@ -657,7 +724,7 @@ class MultiLabelSegmentation:
                     "Cannot create group image: shape is unknown. "
                     "Use set_group_image() first, or create with shape= or reference=."
                 )
-            arr = np.zeros(self._shape, dtype=self._dtype)
+            arr = np.zeros(self._shape, dtype=LABEL_DTYPE)
             self._group_images[index] = Image(
                 arr,
                 spacing=self._spacing,
@@ -777,7 +844,13 @@ class MultiLabelSegmentation:
     # ------------------------------------------------------------------
 
     def _compose_array(self) -> np.ndarray:
-        """Compose all group images into a 4D array [num_groups, x, y, z].
+        """Compose all group images into a 4D array ``[num_groups, Z, Y, X]``.
+
+        Per-group spatial arrays follow the same ``(Z, Y, X)`` numpy
+        layout :class:`~mitk_workbench_remote.image.Image` uses, so a
+        voxel at ``arr[k, j, i]`` lives at world ``(i*sx, j*sy, k*sz)``.
+        The multilabel NRRD writer transposes to MITK's wire layout at
+        the I/O boundary; callers do not see the F-order quirk.
 
         Raises:
             ValueError: If there are no groups or if shape is unknown.
@@ -800,7 +873,6 @@ class MultiLabelSegmentation:
         arrays: list[np.ndarray] = []
         for img in self._group_images:
             if img is None:
-                # intentional: enforce MITK uint16 contract, not self._dtype
                 arrays.append(np.zeros(shape, dtype=LABEL_DTYPE))
             else:
                 arrays.append(img.array)

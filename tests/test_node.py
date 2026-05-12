@@ -935,7 +935,8 @@ def test_get_data_multilabel_segmentation_direct_mode() -> None:
         status=200,
         content_type="application/octet-stream",
     )
-    result = node.get_data()
+    # Use REMOTE to always get mw type regardless of mitk availability.
+    result = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(result, MultiLabelSegmentation)
     assert len(result.groups) == 1
     assert result.get_label(1) is not None
@@ -1204,7 +1205,8 @@ def test_get_data_image_remote_returns_mw_image() -> None:
 
 @responses.activate
 def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
-    """AUTO falls back to mw.Image when mitk.Image conversion raises ImportError."""
+    """AUTO falls back to mw.Image when mitk is not available."""
+    import sys
     from unittest.mock import patch
 
     node = _make_direct_node()
@@ -1217,7 +1219,7 @@ def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
         content_type="application/octet-stream",
     )
 
-    with patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")):
+    with patch.dict(sys.modules, {"mitk": None}):
         result = node.get_data(as_type=DataRepresentation.AUTO)
 
     assert isinstance(result, Image)
@@ -1226,6 +1228,7 @@ def test_get_data_image_auto_without_mitk_returns_mw_image() -> None:
 @responses.activate
 def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
     """as_type=MITK propagates ImportError when mitk is not installed."""
+    import sys
     from unittest.mock import patch
 
     node = _make_direct_node()
@@ -1238,16 +1241,13 @@ def test_get_data_image_mitk_raises_when_mitk_absent() -> None:
         content_type="application/octet-stream",
     )
 
-    with (
-        patch.object(Image, "to_mitk", side_effect=ImportError("mitk not available")),
-        pytest.raises(ImportError),
-    ):
+    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
         node.get_data(as_type=DataRepresentation.MITK)
 
 
 @responses.activate
-def test_get_data_multilabel_mitk_raises_notimplementederror() -> None:
-    """as_type=MITK for MultiLabelSegmentation raises NotImplementedError (WP-11 fence)."""
+def test_get_data_multilabel_remote_returns_mw_mls() -> None:
+    """as_type=REMOTE always returns mw.MultiLabelSegmentation."""
     from mitk_workbench_remote._io import write_multilabel_nrrd
     from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
 
@@ -1263,8 +1263,61 @@ def test_get_data_multilabel_mitk_raises_notimplementederror() -> None:
         status=200,
         content_type="application/octet-stream",
     )
+    result = node.get_data(as_type=DataRepresentation.REMOTE)
+    assert isinstance(result, MultiLabelSegmentation)
+    assert result.get_label(1) is not None
 
-    with pytest.raises(NotImplementedError, match="WP-11"):
+
+@responses.activate
+def test_get_data_multilabel_auto_without_mitk_returns_mw_mls() -> None:
+    """AUTO falls back to mw.MultiLabelSegmentation when mitk is not available."""
+    import sys
+    from unittest.mock import patch
+
+    from mitk_workbench_remote._io import write_multilabel_nrrd
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+    node = _make_direct_node(data_type="MultiLabelSegmentation")
+    seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+    seg.add_label(Label(1, "Organ"), group=seg.add_group("Group1"))
+    nrrd_bytes = write_multilabel_nrrd(seg)
+
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    with patch.dict(sys.modules, {"mitk": None}):
+        result = node.get_data(as_type=DataRepresentation.AUTO)
+
+    assert isinstance(result, MultiLabelSegmentation)
+    assert result.get_label(1) is not None
+
+
+@responses.activate
+def test_get_data_multilabel_mitk_raises_when_mitk_absent() -> None:
+    """as_type=MITK raises ImportError for MLS when mitk is not installed."""
+    import sys
+    from unittest.mock import patch
+
+    from mitk_workbench_remote._io import write_multilabel_nrrd
+    from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+    node = _make_direct_node(data_type="MultiLabelSegmentation")
+    seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+    seg.add_label(Label(1, "Organ"), group=seg.add_group("Group1"))
+    nrrd_bytes = write_multilabel_nrrd(seg)
+
+    responses.add(
+        responses.GET,
+        _api("/datastorage/nodes/node_1/data"),
+        body=nrrd_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    with patch.dict(sys.modules, {"mitk": None}), pytest.raises(ImportError):
         node.get_data(as_type=DataRepresentation.MITK)
 
 
@@ -1377,3 +1430,122 @@ class TestGetDataWithMitk:
         raw_prop = result.get_property("tsstring", raw=True)
         assert isinstance(raw_prop, mitk.TemporoSpatialStringProperty)
         assert raw_prop.value == "hello"
+
+    # ------------------------------------------------------------------
+    # MLS + mitk
+    # ------------------------------------------------------------------
+
+    @responses.activate
+    def test_get_data_multilabel_auto_with_mitk_returns_mitk_mls(self) -> None:
+        import mitk
+
+        from mitk_workbench_remote._io import write_multilabel_nrrd
+        from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+        seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+        seg.add_label(Label(1, "Liver"), group=seg.add_group("Anatomy"))
+        nrrd_bytes = write_multilabel_nrrd(seg)
+
+        node = _make_direct_node(data_type="MultiLabelSegmentation")
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        result = node.get_data(as_type=DataRepresentation.AUTO)
+        assert isinstance(result, mitk.MultiLabelSegmentation)
+
+    @responses.activate
+    def test_get_data_multilabel_mitk_returns_mitk_mls(self) -> None:
+        import mitk
+
+        from mitk_workbench_remote._io import write_multilabel_nrrd
+        from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+        seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+        seg.add_label(Label(1, "Liver"), group=seg.add_group("Anatomy"))
+        seg.add_label(Label(2, "Spleen"), group=0)
+        nrrd_bytes = write_multilabel_nrrd(seg)
+
+        node = _make_direct_node(data_type="MultiLabelSegmentation")
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        result = node.get_data(as_type=DataRepresentation.MITK)
+        assert isinstance(result, mitk.MultiLabelSegmentation)
+        values = sorted(int(v) for v in result.label_values if int(v) != 0)
+        assert values == [1, 2]
+
+    @responses.activate
+    def test_get_data_multilabel_mitk_include_properties(self) -> None:
+        import mitk
+
+        from mitk_workbench_remote._io import write_multilabel_nrrd
+        from mitk_workbench_remote.multilabel import Label, MultiLabelSegmentation
+
+        seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
+        seg.add_label(Label(1, "Liver"), group=seg.add_group("Anatomy"))
+        nrrd_bytes = write_multilabel_nrrd(seg)
+
+        node = _make_direct_node(data_type="MultiLabelSegmentation")
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/data"),
+            body=nrrd_bytes,
+            status=200,
+            content_type="application/octet-stream",
+        )
+        responses.add(
+            responses.GET,
+            _api("/datastorage/nodes/node_1/properties"),
+            json={"data": {"properties": {"name": "MySeg"}}},
+            status=200,
+        )
+        result = node.get_data(as_type=DataRepresentation.MITK, include_properties=True)
+        assert isinstance(result, mitk.MultiLabelSegmentation)
+        assert result.get_property("name") == "MySeg"
+
+    @responses.activate
+    def test_set_data_mitk_mls_uploads(self) -> None:
+        import mitk
+
+        node = _make_direct_node(data_type="MultiLabelSegmentation")
+        responses.add(
+            responses.PUT,
+            _api("/datastorage/nodes/node_1/data"),
+            json={},
+            status=200,
+        )
+        ref = mitk.Image.from_numpy(np.zeros((3, 4, 5), dtype=np.uint16), spacing=(1.0, 1.0, 1.0))
+        mitk_seg = mitk.MultiLabelSegmentation(ref)
+        lbl = mitk.Label(1, "Organ")
+        mitk_seg.add_group(None, [lbl])
+
+        node.set_data(mitk_seg)
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.method == "PUT"
+
+    @responses.activate
+    def test_set_data_mitk_mls_sets_data_type(self) -> None:
+        import mitk
+
+        node = _make_direct_node(data_type="MultiLabelSegmentation")
+        responses.add(
+            responses.PUT,
+            _api("/datastorage/nodes/node_1/data"),
+            json={},
+            status=200,
+        )
+        ref = mitk.Image.from_numpy(np.zeros((3, 4, 5), dtype=np.uint16), spacing=(1.0, 1.0, 1.0))
+        mitk_seg = mitk.MultiLabelSegmentation(ref)
+
+        node.set_data(mitk_seg)
+        # data_type must be set locally without a refresh() round-trip.
+        assert node.data_type == "MultiLabelSegmentation"
+        assert len(responses.calls) == 1  # only the PUT, no GET for refresh

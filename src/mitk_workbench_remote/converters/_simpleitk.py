@@ -24,7 +24,7 @@ Preserves spacing, origin, and direction through the conversion.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import SimpleITK as sitk
@@ -35,7 +35,7 @@ class SitkConverter:
 
     @property
     def target_type(self) -> type:
-        return sitk.Image
+        return cast(type, sitk.Image)
 
     def can_handle(self, obj: Any) -> bool:
         return isinstance(obj, sitk.Image)
