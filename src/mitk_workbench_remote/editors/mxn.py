@@ -86,19 +86,12 @@ class MxNRenderWindow(RenderWindow):
 
     Adds the per-cell selected-position primitive and overrides
     :meth:`get_summary` to return the richer :class:`MxNWindowSummary`.
-    """
 
-    @property
-    def kind(self) -> WindowKind:
-        # v2-only short-circuit: under the v2 schema every MxN cell is 2D
-        # (the layout schema's view_direction enum has no 3D value), so a
-        # handle obtained via `editor[id]` doesn't need a network round-trip
-        # just to learn its kind. WHEN v3 INTRODUCES 3D MxN CELLS, drop this
-        # override and let the base class fetch the live summary instead —
-        # otherwise this returns the wrong kind silently.
-        if self._kind is None:
-            self._kind = WindowKind.TWO_D
-        return self._kind
+    ``kind`` is resolved via the inherited base-class accessor: cached when
+    eagerly populated by :meth:`MxNEditor.list_windows`, otherwise fetched
+    lazily through :meth:`get_summary`. No client-side assumption about
+    which cell kinds the active schema supports.
+    """
 
     def get_summary(self) -> MxNWindowSummary:
         """Fetch the per-cell summary (always live)."""

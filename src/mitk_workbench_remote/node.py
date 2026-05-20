@@ -231,6 +231,16 @@ class DataNode:
         """Full storage path (e.g. ``"/CT_Scan/seg"``). Updated by :meth:`refresh`."""
         return self._path
 
+    @property
+    def transport(self) -> RestTransport:
+        """REST transport used for all HTTP calls. Read-only.
+
+        Exposed so callers can verify two handles share the same Workbench
+        instance (``node.transport is other.transport``) without reaching
+        into private state.
+        """
+        return self._transport
+
     # ------------------------------------------------------------------
     # Common properties — live REST calls via get_property / set_property
     # ------------------------------------------------------------------

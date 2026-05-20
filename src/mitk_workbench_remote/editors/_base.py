@@ -292,7 +292,10 @@ class Camera:
 
         ``kind`` is preserved from ``self`` (it is local metadata, never
         diffed). A field is "different" iff it is non-``None`` on ``self``
-        and not equal to the value on ``other``.
+        and not equal to the value on ``other``. When ``self.kind`` is set,
+        the scalar that does not apply to that kind (``perspective_angle``
+        for 2D, ``parallel_scale`` for 3D) is dropped from the result so
+        ``to_payload()`` cannot produce a body the server rejects.
         """
         kept: dict[str, Any] = {}
         for f in dataclasses.fields(self):
@@ -302,6 +305,10 @@ class Camera:
             theirs = getattr(other, f.name)
             if mine is not None and mine != theirs:
                 kept[f.name] = mine
+        if self.kind == WindowKind.TWO_D:
+            kept.pop("perspective_angle", None)
+        elif self.kind == WindowKind.THREE_D:
+            kept.pop("parallel_scale", None)
         return Camera(kind=self.kind, **kept)
 
 
@@ -724,7 +731,7 @@ class RenderWindow:
         would target the wrong server. CLAUDE.md guarantees independent
         ``Workbench`` instances are independent — surface the violation.
         """
-        if node._transport is not self._transport:
+        if node.transport is not self._transport:
             raise ValueError(
                 "DataNode belongs to a different Workbench transport than this RenderWindow"
             )

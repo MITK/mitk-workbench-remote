@@ -467,7 +467,7 @@ def make_segmentation(
         shape, spacing, trunk_center, max(0.5, trunk_r - label_radius_mm)
     )
     safe_indices = np.argwhere(safe_zone)
-    if safe_indices.size == 0:
+    if len(safe_indices) == 0:
         raise ValueError("reference image is too small to host labels with the snowman recipe")
     trunk_mask = _phys_sphere_mask(shape, spacing, trunk_center, trunk_r)
 

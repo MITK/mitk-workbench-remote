@@ -1,6 +1,20 @@
 # SPDX-FileCopyrightText: 2026, German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# or find it in LICENSE.txt.
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """MxNEditor — info, listings, layout I/O (raw + typed), per-cell selected-position."""
 
@@ -116,13 +130,42 @@ def test_list_windows_returns_mxn_render_windows() -> None:
     assert windows[0].view_direction == ViewDirection.AXIAL
 
 
+@responses.activate
 def test_get_window_does_not_round_trip() -> None:
+    # Constructing a window handle from a known id must not hit the network.
+    # Reading server-backed fields (kind, view_direction, ...) does, but
+    # that is exercised in the dedicated tests below.
     editor = MxNEditor(_transport())
     win = editor["mxn__widget0"]
     assert isinstance(win, MxNRenderWindow)
     assert win.id == "mxn__widget0"
-    # Per v2 contract every MxN cell is 2D — eager fast-path.
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_kind_resolves_via_summary_when_uncached() -> None:
+    # MxNRenderWindow no longer hard-codes 2D for cells obtained via
+    # `editor[id]`: a future schema may permit 3D cells, so kind is
+    # fetched from the live per-cell summary on first access.
+    responses.add(
+        responses.GET,
+        _api("/rendering/editors/mxn/windows/mxn__widget0"),
+        json={
+            "id": "mxn__widget0",
+            "kind": "2d",
+            "view_direction": "axial",
+            "links": {"selection": "main"},
+            "has_camera": True,
+            "has_selected_slice": True,
+            "has_selected_position": True,
+        },
+    )
+    win = MxNEditor(_transport())["mxn__widget0"]
     assert win.kind == WindowKind.TWO_D
+    assert len(responses.calls) == 1
+    # Subsequent reads are served from the cache populated by get_summary.
+    assert win.kind == WindowKind.TWO_D
+    assert len(responses.calls) == 1
 
 
 @responses.activate
@@ -291,7 +334,7 @@ def test_update_layout_rejects_non_document_return() -> None:
         )
         editor = MxNEditor(_transport())
         with pytest.raises(TypeError, match="MxNLayoutDocument"):
-            editor.update_layout(lambda _d: {"version": "2.0"})  # type: ignore[arg-type]
+            editor.update_layout(lambda _d: {"version": "2.0"})
 
 
 @responses.activate

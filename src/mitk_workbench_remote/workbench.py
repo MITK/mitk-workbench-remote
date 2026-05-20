@@ -39,6 +39,7 @@ from mitk_workbench_remote.transport import RestTransport, TransferMode
 
 if TYPE_CHECKING:
     from mitk_workbench_remote.editors import (
+        EditorAlias,
         EditorBase,
         EditorDescriptor,
         MxNEditor,
@@ -346,16 +347,20 @@ class Workbench:
             self._mxn = MxNEditor(self._transport)
         return self._mxn
 
-    def editor(self, alias: str) -> EditorBase:
+    def editor(self, alias: str | EditorAlias) -> EditorBase:
         """Return an editor handle by alias.
 
-        For the well-known aliases (``"stdmulti"``, ``"mxn"``) this returns
-        the same instance as the named property (:attr:`std_multi` /
-        :attr:`mxn`). Unknown aliases raise :class:`ValueError`.
+        Accepts either a raw alias string (``"stdmulti"``, ``"mxn"``) or
+        an :class:`~mitk_workbench_remote.editors.EditorAlias` member.
+        For the well-known aliases this returns the same instance as the
+        named property (:attr:`std_multi` / :attr:`mxn`). Unknown aliases
+        raise :class:`ValueError`.
         """
-        if alias == "stdmulti":
+        from mitk_workbench_remote.editors import EditorAlias
+
+        if alias == EditorAlias.STD_MULTI:
             return self.std_multi
-        if alias == "mxn":
+        if alias == EditorAlias.MXN:
             return self.mxn
         raise ValueError(f"Unknown editor alias: {alias!r}")
 
@@ -674,7 +679,7 @@ class Workbench:
         if (width is None) != (height is None):
             raise ValueError("width and height must both be given or both omitted")
 
-        params: dict[str, str | int] = {"format": fmt}
+        params: dict[str, str | int] = {"format": str(fmt)}
         if width is not None:
             params["width"] = width
         if height is not None:
