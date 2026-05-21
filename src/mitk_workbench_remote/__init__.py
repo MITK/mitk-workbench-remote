@@ -29,7 +29,31 @@ import logging
 
 from mitk_workbench_remote._version import __version__
 from mitk_workbench_remote.discovery import discover, launch
-from mitk_workbench_remote.errors import RenderingError, UnsupportedDataTypeError
+from mitk_workbench_remote.editors import (
+    Camera,
+    EditorAlias,
+    EditorBase,
+    EditorDescriptor,
+    EditorInfo,
+    MxNEditor,
+    MxNRenderWindow,
+    MxNWindowSummary,
+    RenderWindow,
+    SelectedSlice,
+    SliceBounds,
+    StandardView,
+    StdMultiEditor,
+    ViewDirection,
+    WindowKind,
+    WindowSummary,
+)
+from mitk_workbench_remote.errors import (
+    EditorNotActiveError,
+    RenderingError,
+    RenderWindowNotFoundError,
+    UnsupportedDataTypeError,
+    UnsupportedOperationError,
+)
 from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, LabelGroup, MultiLabelSegmentation
 from mitk_workbench_remote.node import DataNode, DataRepresentation, PropertyScope
@@ -51,25 +75,44 @@ from mitk_workbench_remote.workbench import (
 
 __all__ = [
     "LABEL_DTYPE",
+    "Camera",
     "DataNode",
     "DataRepresentation",
     "DataStorage",
+    "EditorAlias",
+    "EditorBase",
+    "EditorDescriptor",
+    "EditorInfo",
+    "EditorNotActiveError",
     "Image",
     "Label",
     "LabelGroup",
     "MultiLabelSegmentation",
+    "MxNEditor",
+    "MxNRenderWindow",
+    "MxNWindowSummary",
     "PositionBounds",
     "PropertyScope",
     "ReinitMode",
+    "RenderWindow",
+    "RenderWindowNotFoundError",
     "RenderWindows",
     "RenderingError",
     "ScreenshotFormat",
     "SelectedPosition",
+    "SelectedSlice",
     "SelectedTime",
+    "SliceBounds",
     "SpatialImage",
+    "StandardView",
+    "StdMultiEditor",
     "TimeBounds",
     "TransferMode",
     "UnsupportedDataTypeError",
+    "UnsupportedOperationError",
+    "ViewDirection",
+    "WindowKind",
+    "WindowSummary",
     "Workbench",
     "WorkbenchInfo",
     "__version__",

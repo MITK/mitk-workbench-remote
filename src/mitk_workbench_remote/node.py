@@ -231,6 +231,16 @@ class DataNode:
         """Full storage path (e.g. ``"/CT_Scan/seg"``). Updated by :meth:`refresh`."""
         return self._path
 
+    @property
+    def transport(self) -> RestTransport:
+        """REST transport used for all HTTP calls. Read-only.
+
+        Exposed so callers can verify two handles share the same Workbench
+        instance (``node.transport is other.transport``) without reaching
+        into private state.
+        """
+        return self._transport
+
     # ------------------------------------------------------------------
     # Common properties — live REST calls via get_property / set_property
     # ------------------------------------------------------------------
@@ -649,8 +659,8 @@ class DataNode:
                 )
             return mitk_seg
 
-        # AUTO: try direct IOUtil path first; fall back to mw.MultiLabelSegmentation if
-        # mitk absent.
+        # AUTO: try direct IOUtil path first; fall back to mw.MultiLabelSegmentation
+        # if mitk absent.
         try:
             mitk_seg = _nrrd_source_to_mitk(nrrd_source, "MultiLabelSegmentation")
             if include_properties:

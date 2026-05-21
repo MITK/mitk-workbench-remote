@@ -224,7 +224,7 @@ def test_is_connected_false() -> None:
 
 @responses.activate
 def test_info_returns_workbench_info() -> None:
-    responses.add(responses.GET, _api("/"), json=_root_response(), status=200)
+    responses.add(responses.GET, _api("/info"), json=_root_response(), status=200)
     t = _make_transport()
     wb = Workbench(t)
     info = wb.info
@@ -237,7 +237,7 @@ def test_info_returns_workbench_info() -> None:
 
 @responses.activate
 def test_info_includes_url() -> None:
-    responses.add(responses.GET, _api("/"), json=_root_response(), status=200)
+    responses.add(responses.GET, _api("/info"), json=_root_response(), status=200)
     t = _make_transport()
     wb = Workbench(t)
     assert wb.info.url == BASE
@@ -246,13 +246,13 @@ def test_info_includes_url() -> None:
 
 @responses.activate
 def test_info_cached_after_first_access() -> None:
-    responses.add(responses.GET, _api("/"), json=_root_response(), status=200)
+    responses.add(responses.GET, _api("/info"), json=_root_response(), status=200)
     t = _make_transport()
     wb = Workbench(t)
     _ = wb.info
     _ = wb.info
     _ = wb.info
-    root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/")]
+    root_calls = [c for c in responses.calls if c.request.url.endswith("/api/v1/info")]
     assert len(root_calls) == 1
     wb.close()
 
@@ -836,7 +836,10 @@ def test_get_position_returns_dataclass() -> None:
         _api("/rendering/selected-position"),
         json={
             "position": [10.0, 20.0, 30.0],
-            "bounds": {"min": [-50.0, -50.0, -50.0], "max": [50.0, 50.0, 50.0]},
+            "bounds": {
+                "min_position": [-50.0, -50.0, -50.0],
+                "max_position": [50.0, 50.0, 50.0],
+            },
         },
     )
     t = _make_transport()
@@ -844,8 +847,8 @@ def test_get_position_returns_dataclass() -> None:
     pos = wb.get_position()
     assert isinstance(pos, SelectedPosition)
     assert pos.position == (10.0, 20.0, 30.0)
-    assert pos.bounds.min == (-50.0, -50.0, -50.0)
-    assert pos.bounds.max == (50.0, 50.0, 50.0)
+    assert pos.bounds.min_position == (-50.0, -50.0, -50.0)
+    assert pos.bounds.max_position == (50.0, 50.0, 50.0)
     wb.close()
 
 
@@ -856,14 +859,14 @@ def test_get_position_with_null_bounds() -> None:
         _api("/rendering/selected-position"),
         json={
             "position": [0.0, 0.0, 0.0],
-            "bounds": {"min": None, "max": None},
+            "bounds": {"min_position": None, "max_position": None},
         },
     )
     t = _make_transport()
     wb = Workbench(t)
     pos = wb.get_position()
-    assert pos.bounds.min is None
-    assert pos.bounds.max is None
+    assert pos.bounds.min_position is None
+    assert pos.bounds.max_position is None
     wb.close()
 
 
@@ -1047,4 +1050,63 @@ def test_render_window_not_available_raises_rendering_error() -> None:
     wb = Workbench(t)
     with pytest.raises(errors.RenderingError):
         wb.get_position()
+    wb.close()
+
+
+# ---------------------------------------------------------------------------
+# Editor accessors
+# ---------------------------------------------------------------------------
+
+
+def test_std_multi_property_is_lazy_and_cached() -> None:
+    from mitk_workbench_remote import StdMultiEditor
+
+    wb = Workbench(_make_transport())
+    a = wb.std_multi
+    b = wb.std_multi
+    assert isinstance(a, StdMultiEditor)
+    assert a is b
+    wb.close()
+
+
+def test_mxn_property_is_lazy_and_cached() -> None:
+    from mitk_workbench_remote import MxNEditor
+
+    wb = Workbench(_make_transport())
+    a = wb.mxn
+    b = wb.mxn
+    assert isinstance(a, MxNEditor)
+    assert a is b
+    wb.close()
+
+
+def test_editor_lookup_by_alias_returns_same_instance_as_property() -> None:
+    wb = Workbench(_make_transport())
+    assert wb.editor("stdmulti") is wb.std_multi
+    assert wb.editor("mxn") is wb.mxn
+    wb.close()
+
+
+def test_editor_lookup_unknown_alias_raises_value_error() -> None:
+    wb = Workbench(_make_transport())
+    with pytest.raises(ValueError, match="Unknown editor alias"):
+        wb.editor("ortho")
+    wb.close()
+
+
+@responses.activate
+def test_editors_lists_descriptors() -> None:
+    responses.add(
+        responses.GET,
+        _api("/rendering/editors"),
+        json=[
+            {"alias": "stdmulti", "plugin_id": "org.mitk.editors.stdmultiwidget", "active": True},
+            {"alias": "mxn", "plugin_id": "org.mitk.editors.mxnmultiwidget", "active": False},
+        ],
+    )
+    wb = Workbench(_make_transport())
+    descriptors = wb.editors()
+    assert [d.alias for d in descriptors] == ["stdmulti", "mxn"]
+    assert descriptors[0].active is True
+    assert descriptors[1].active is False
     wb.close()

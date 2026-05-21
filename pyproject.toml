@@ -35,6 +35,11 @@ dependencies = [
 simpleitk = ["SimpleITK>=2.2"]
 mlarray = ["mlarray>=0.1"]
 mitk = ["mitk"]
+# `layout` enables the typed mitk.mxn.layout DSL paths on MxNEditor
+# (get_layout, set_layout(MxNLayoutDocument | str | Path),
+# update_layout, apply_grid, apply_preset). Raw-dict layout I/O
+# (get_layout_json, set_layout(dict)) does not require this extra.
+layout = ["mitk"]
 all = ["SimpleITK>=2.2", "mlarray>=0.1", "mitk"]
 dev = [
     "pytest>=7.0",

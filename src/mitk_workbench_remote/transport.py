@@ -22,7 +22,7 @@ All REST calls go through RestTransport. This is the single point of change
 when migrating the way we do the REST communication.
 
 Classes:
-    ServerInfo: Parsed capabilities from GET /api/v1/.
+    ServerInfo: Parsed capabilities from GET /api/v1/info.
     FileAccessConfig: Parsed response from GET /api/v1/config/file-access.
     RestTransport: Thin HTTP client with auth, timeout, and transfer mode support.
     RestResponse: Lightweight response wrapper (not leaked to users).
@@ -43,6 +43,33 @@ import requests
 from mitk_workbench_remote import errors
 
 _log = logging.getLogger(__name__)
+
+
+def _parse_editor_url(response: requests.Response) -> tuple[str, str, str]:
+    """Extract (editor_alias, window_id, operation) from a failing editor URL.
+
+    Looks for ``/rendering/editors/<alias>[/windows/<id>[/<operation>]]`` in
+    the request URL. Missing segments come back as empty strings — callers
+    populate exception fields on a best-effort basis (the RFC 7807 message
+    already carries the human-readable detail).
+    """
+    request = response.request
+    path = urllib.parse.urlparse(request.url or "").path if request is not None else ""
+    parts = path.split("/")
+    alias = ""
+    window = ""
+    operation = ""
+    try:
+        idx = parts.index("editors")
+    except ValueError:
+        return alias, window, operation
+    if idx + 1 < len(parts):
+        alias = parts[idx + 1]
+    if idx + 3 < len(parts) and parts[idx + 2] == "windows":
+        window = parts[idx + 3]
+    if idx + 4 < len(parts):
+        operation = parts[idx + 4]
+    return alias, window, operation
 
 
 class TransferMode(str, Enum):
@@ -67,7 +94,7 @@ class FileAccessMode(str, Enum):
 
 @dataclass(frozen=True)
 class ServerInfo:
-    """Parsed response from GET /api/v1/.
+    """Parsed response from GET /api/v1/info.
 
     Args:
         name: Human-readable server name.
@@ -198,9 +225,9 @@ class RestTransport:
 
     @property
     def server_info(self) -> ServerInfo:
-        """Server capabilities, fetched once from GET /api/v1/ and cached."""
+        """Server capabilities, fetched once from GET /api/v1/info and cached."""
         if self._server_info is None:
-            data = self.get("/").json()["data"]
+            data = self.get("/info").json()["data"]
             caps = data.get("capabilities", {})
             self._server_info = ServerInfo(
                 name=data.get("name", ""),
@@ -244,7 +271,7 @@ class RestTransport:
 
         1. Explicit value set in the constructor.
         2. :attr:`TransferMode.FILE_REFERENCE` if the server advertises it in
-           ``GET /api/v1/`` capabilities AND the server is on localhost
+           ``GET /api/v1/info`` capabilities AND the server is on localhost
            (filesystem access required).
         3. :attr:`TransferMode.DIRECT` otherwise.
 
@@ -382,6 +409,15 @@ class RestTransport:
             raise errors.RenderingError(message)
         if code == "RENDER_WINDOW_NOT_AVAILABLE":
             raise errors.RenderingError(message)
+        if code == "EDITOR_NOT_ACTIVE":
+            alias, _window, _op = _parse_editor_url(response)
+            raise errors.EditorNotActiveError(alias, message)
+        if code == "RENDER_WINDOW_NOT_FOUND":
+            alias, window, _op = _parse_editor_url(response)
+            raise errors.RenderWindowNotFoundError(alias, window, message)
+        if code == "UNSUPPORTED_OPERATION":
+            alias, window, op = _parse_editor_url(response)
+            raise errors.UnsupportedOperationError(alias, window, op, message)
         raise errors.ApiError(status, code, message)
 
     def _is_localhost(self) -> bool:

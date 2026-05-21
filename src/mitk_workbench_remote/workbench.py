@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from mitk_workbench_remote import errors
@@ -37,7 +37,36 @@ from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport, TransferMode
 
+if TYPE_CHECKING:
+    from mitk_workbench_remote.editors import (
+        EditorAlias,
+        EditorBase,
+        EditorDescriptor,
+        MxNEditor,
+        StdMultiEditor,
+    )
+
 _log = logging.getLogger(__name__)
+
+
+def _xyz(seq: Any) -> tuple[float, float, float]:
+    """Convert a 3-element JSON array to a typed ``(x, y, z)`` tuple."""
+    x, y, z = seq
+    return (float(x), float(y), float(z))
+
+
+def _position_bounds_from_json(body: dict[str, Any]) -> PositionBounds:
+    """Parse a ``{"min_position": ..., "max_position": ...}`` bounds object.
+
+    Either field may be ``null`` when no geometry is loaded; both are
+    optional in that case.
+    """
+    raw_min = body.get("min_position")
+    raw_max = body.get("max_position")
+    return PositionBounds(
+        min_position=_xyz(raw_min) if raw_min is not None else None,
+        max_position=_xyz(raw_max) if raw_max is not None else None,
+    )
 
 
 def _find_listening_pid(port: int) -> int | None:
@@ -92,28 +121,14 @@ class PositionBounds:
     """World-space axis-aligned bounding box of the scene.
 
     Attributes:
-        min: Minimum corner ``[x, y, z]``, or ``None`` if no geometry is loaded.
-        max: Maximum corner ``[x, y, z]``, or ``None`` if no geometry is loaded.
+        min_position: Minimum corner ``[x, y, z]``, or ``None`` if no geometry
+            is loaded.
+        max_position: Maximum corner ``[x, y, z]``, or ``None`` if no geometry
+            is loaded.
     """
 
-    min: tuple[float, float, float] | None
-    max: tuple[float, float, float] | None
-
-
-def _position_bounds_from_json(b: dict[str, Any]) -> PositionBounds:
-    """Parse a ``{"min": [...], "max": [...]}`` JSON dict into a PositionBounds.
-
-    ``min`` and ``max`` may each be ``None`` when no geometry is loaded.
-    """
-    bmin: tuple[float, float, float] | None = None
-    bmax: tuple[float, float, float] | None = None
-    if b.get("min") is not None:
-        bx, by, bz = b["min"]
-        bmin = (bx, by, bz)
-    if b.get("max") is not None:
-        mx, my, mz = b["max"]
-        bmax = (mx, my, mz)
-    return PositionBounds(min=bmin, max=bmax)
+    min_position: tuple[float, float, float] | None
+    max_position: tuple[float, float, float] | None
 
 
 @dataclass(frozen=True)
@@ -264,6 +279,8 @@ class Workbench:
         self._process = process
         self._info: WorkbenchInfo | None = None
         self._storage: DataStorage | None = None
+        self._std_multi: StdMultiEditor | None = None
+        self._mxn: MxNEditor | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -284,7 +301,7 @@ class Workbench:
     def info(self) -> WorkbenchInfo:
         """Metadata about the connected Workbench instance.
 
-        Fetched lazily from ``GET /api/v1/`` on first access and cached thereafter.
+        Fetched lazily from ``GET /api/v1/info`` on first access and cached thereafter.
         """
         if self._info is None:
             si = self._transport.server_info
@@ -302,6 +319,68 @@ class Workbench:
         if self._storage is None:
             self._storage = DataStorage(self._transport)
         return self._storage
+
+    # ------------------------------------------------------------------
+    # Editors
+    # ------------------------------------------------------------------
+
+    @property
+    def std_multi(self) -> StdMultiEditor:
+        """Handle to the StdMultiWidget editor. Lazy and cached.
+
+        The handle holds only the transport — every state read goes to
+        the network. Use :attr:`is_active` on the returned handle (or
+        :meth:`editors`) to check whether the editor is currently open.
+        """
+        if self._std_multi is None:
+            from mitk_workbench_remote.editors import StdMultiEditor
+
+            self._std_multi = StdMultiEditor(self._transport)
+        return self._std_multi
+
+    @property
+    def mxn(self) -> MxNEditor:
+        """Handle to the MxN multi-widget editor. Lazy and cached."""
+        if self._mxn is None:
+            from mitk_workbench_remote.editors import MxNEditor
+
+            self._mxn = MxNEditor(self._transport)
+        return self._mxn
+
+    def editor(self, alias: str | EditorAlias) -> EditorBase:
+        """Return an editor handle by alias.
+
+        Accepts either a raw alias string (``"stdmulti"``, ``"mxn"``) or
+        an :class:`~mitk_workbench_remote.editors.EditorAlias` member.
+        For the well-known aliases this returns the same instance as the
+        named property (:attr:`std_multi` / :attr:`mxn`). Unknown aliases
+        raise :class:`ValueError`.
+        """
+        from mitk_workbench_remote.editors import EditorAlias
+
+        if alias == EditorAlias.STD_MULTI:
+            return self.std_multi
+        if alias == EditorAlias.MXN:
+            return self.mxn
+        raise ValueError(f"Unknown editor alias: {alias!r}")
+
+    def editors(self) -> list[EditorDescriptor]:
+        """List all known editors with their current activity state.
+
+        Sends ``GET /rendering/editors``. Always live — the active state
+        of an editor changes at runtime as the user opens or closes it.
+        """
+        from mitk_workbench_remote.editors import EditorDescriptor
+
+        body = self._transport.get("/rendering/editors").json()
+        return [
+            EditorDescriptor(
+                alias=item["alias"],
+                plugin_id=item["plugin_id"],
+                active=item["active"],
+            )
+            for item in body
+        ]
 
     # ------------------------------------------------------------------
     # Connectivity
@@ -493,9 +572,8 @@ class Workbench:
         """
         _log.debug("[%s] get_position", self.url)
         body = self._transport.get("/rendering/selected-position").json()
-        x, y, z = body["position"]
         return SelectedPosition(
-            position=(x, y, z),
+            position=_xyz(body["position"]),
             bounds=_position_bounds_from_json(body["bounds"]),
         )
 
@@ -601,7 +679,7 @@ class Workbench:
         if (width is None) != (height is None):
             raise ValueError("width and height must both be given or both omitted")
 
-        params: dict[str, str | int] = {"format": fmt}
+        params: dict[str, str | int] = {"format": str(fmt)}
         if width is not None:
             params["width"] = width
         if height is not None:
