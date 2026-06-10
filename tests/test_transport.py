@@ -18,6 +18,7 @@
 
 """Tests for transport.py."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,7 +46,7 @@ def _api(path: str, base: str = BASE) -> str:
     return f"{base}/api/v1{path}"
 
 
-def _root_response(transfer_modes: list[str]) -> dict:
+def _root_response(transfer_modes: list[str]) -> dict[str, Any]:
     """Build a minimal GET / response body."""
     return {
         "data": {
@@ -63,9 +64,9 @@ def _file_access_response(
     restrictions_active: bool = False,
     max_active_temp_dirs_per_ip: int = 5,
     allowed_paths: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build a minimal GET /config/file-access response body."""
-    body: dict = {
+    body: dict[str, Any] = {
         "data": {
             "mode": mode,
             "restrictions_active": restrictions_active,
@@ -89,12 +90,30 @@ def test_base_url_trailing_slash_stripped() -> None:
 
 def test_auth_header_set_when_token_given() -> None:
     with RestTransport(BASE, token="secret") as t:
-        assert t._session.headers["X-MITK-API-Token"] == "secret"
+        assert t._session.headers["Authorization"] == "Bearer secret"
 
 
+@responses.activate
 def test_no_auth_header_without_token() -> None:
+    # No token configured: the outgoing request must carry no Authorization header.
+    responses.add(responses.GET, _api("/nodes/abc/data"), body=b"data", status=200)
     with RestTransport(BASE) as t:
+        t.get("/nodes/abc/data")
+        sent = responses.calls[0].request.headers
+        assert "Authorization" not in sent
+
+
+@responses.activate
+def test_legacy_token_header_not_sent() -> None:
+    # The server reads only Authorization: Bearer; the custom X-MITK-API-Token
+    # header it used to send is never recognized and must not appear.
+    responses.add(responses.GET, _api("/nodes/abc/data"), body=b"data", status=200)
+    with RestTransport(BASE, token="secret") as t:
         assert "X-MITK-API-Token" not in t._session.headers
+        t.get("/nodes/abc/data")
+        sent = responses.calls[0].request.headers
+        assert sent["Authorization"] == "Bearer secret"
+        assert "X-MITK-API-Token" not in sent
 
 
 def test_default_timeout() -> None:
@@ -600,7 +619,7 @@ def test_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _editor_error(code: str, message: str, status: int) -> dict:
+def _editor_error(code: str, message: str, status: int) -> dict[str, Any]:
     return {
         "error": {
             "type": f"https://docs.mitk.org/api/errors/{code}",

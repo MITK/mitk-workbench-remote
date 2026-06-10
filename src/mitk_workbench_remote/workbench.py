@@ -803,7 +803,7 @@ def connect(
 
     Args:
         url: Base URL of the Workbench REST server.
-        token: Optional API token (``X-MITK-API-Token`` header).
+        token: Optional API token (``Authorization: Bearer`` header).
         timeout: Request timeout in seconds.
         transfer_mode: Override transfer mode (``"direct"`` or
             ``"file-reference"``). When ``None`` the mode is auto-detected

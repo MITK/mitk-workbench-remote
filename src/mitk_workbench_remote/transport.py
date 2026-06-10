@@ -186,7 +186,7 @@ class RestTransport:
     Args:
         base_url: Base URL of the MITK Workbench REST server
             (e.g. ``"http://localhost:8080"``). Trailing slash is stripped.
-        token: Optional API token sent as ``X-MITK-API-Token`` header.
+        token: Optional API token sent as the ``Authorization: Bearer <token>`` header.
         timeout: Request timeout in seconds. Defaults to 30.
         transfer_mode: Override transfer mode (:attr:`TransferMode.DIRECT` or
             :attr:`TransferMode.FILE_REFERENCE`). When ``None`` (default) the
@@ -206,7 +206,7 @@ class RestTransport:
         self._session = requests.Session()
         self._base_url = base_url.rstrip("/")
         if token:
-            self._session.headers["X-MITK-API-Token"] = token
+            self._session.headers["Authorization"] = f"Bearer {token}"
         self._timeout = timeout
         self._transfer_mode: TransferMode | None = (
             TransferMode(transfer_mode) if transfer_mode is not None else None
