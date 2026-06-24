@@ -59,7 +59,7 @@ from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, LabelGroup, Mul
 from mitk_workbench_remote.node import DataNode, DataRepresentation, PropertyScope
 from mitk_workbench_remote.protocols import SpatialImage
 from mitk_workbench_remote.storage import DataStorage
-from mitk_workbench_remote.transport import TransferMode
+from mitk_workbench_remote.transport import InsecureTransportWarning, TransferMode
 from mitk_workbench_remote.workbench import (
     PositionBounds,
     ReinitMode,
@@ -85,6 +85,7 @@ __all__ = [
     "EditorInfo",
     "EditorNotActiveError",
     "Image",
+    "InsecureTransportWarning",
     "Label",
     "LabelGroup",
     "MultiLabelSegmentation",

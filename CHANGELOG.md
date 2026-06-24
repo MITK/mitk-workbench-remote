@@ -29,3 +29,5 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   mlarray auto-registered when installed, plus user-registerable converters.
 - Discovery and launch helpers to find running instances or start new ones.
 - Structured logging via Python's `logging` module.
+- `InsecureTransportWarning` when an API token is configured for a non-local
+  `http://` host, since the `Authorization` header would travel in cleartext.

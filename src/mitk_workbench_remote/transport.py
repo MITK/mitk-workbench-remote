@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import time
 import urllib.parse
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from types import TracebackType
@@ -43,6 +44,18 @@ import requests
 from mitk_workbench_remote import errors
 
 _log = logging.getLogger(__name__)
+
+
+class InsecureTransportWarning(UserWarning):
+    """An API token is being sent over an unencrypted connection.
+
+    Emitted when a token is configured for a plain ``http://`` URL whose host
+    is not loopback: the ``Authorization: Bearer`` header then travels in
+    cleartext and can be intercepted in transit. Prefer ``https`` for remote
+    hosts. Silence with
+    ``warnings.filterwarnings("ignore", category=InsecureTransportWarning)``
+    when the connection runs over a trusted network.
+    """
 
 
 def _parse_editor_url(response: requests.Response) -> tuple[str, str, str]:
@@ -187,6 +200,8 @@ class RestTransport:
         base_url: Base URL of the MITK Workbench REST server
             (e.g. ``"http://localhost:8080"``). Trailing slash is stripped.
         token: Optional API token sent as the ``Authorization: Bearer <token>`` header.
+            Sending a token to a non-local ``http://`` host emits an
+            :class:`InsecureTransportWarning`, since the header travels in cleartext.
         timeout: Request timeout in seconds. Defaults to 30.
         transfer_mode: Override transfer mode (:attr:`TransferMode.DIRECT` or
             :attr:`TransferMode.FILE_REFERENCE`). When ``None`` (default) the
@@ -207,6 +222,14 @@ class RestTransport:
         self._base_url = base_url.rstrip("/")
         if token:
             self._session.headers["Authorization"] = f"Bearer {token}"
+            if urllib.parse.urlparse(self._base_url).scheme == "http" and not self._is_localhost():
+                warnings.warn(
+                    f"Sending the API token over an unencrypted connection to "
+                    f"{self._base_url!r}; the Authorization header travels in "
+                    f"cleartext. Use https for non-local hosts.",
+                    InsecureTransportWarning,
+                    stacklevel=2,
+                )
         self._timeout = timeout
         self._transfer_mode: TransferMode | None = (
             TransferMode(transfer_mode) if transfer_mode is not None else None

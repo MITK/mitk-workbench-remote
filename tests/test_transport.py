@@ -18,6 +18,7 @@
 
 """Tests for transport.py."""
 
+import warnings
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +29,7 @@ from mitk_workbench_remote import errors
 from mitk_workbench_remote.transport import (
     FileAccessConfig,
     FileAccessMode,
+    InsecureTransportWarning,
     RestTransport,
     ServerInfo,
     TransferMode,
@@ -114,6 +116,36 @@ def test_legacy_token_header_not_sent() -> None:
         sent = responses.calls[0].request.headers
         assert sent["Authorization"] == "Bearer secret"
         assert "X-MITK-API-Token" not in sent
+
+
+def test_insecure_warning_for_token_over_remote_http() -> None:
+    # A token over plain http to a remote host travels in cleartext.
+    with pytest.warns(InsecureTransportWarning), RestTransport(BASE_REMOTE, token="secret"):
+        pass
+
+
+def test_no_insecure_warning_for_token_over_localhost() -> None:
+    # http to a loopback host is fine: the token never leaves the machine.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", InsecureTransportWarning)
+        with RestTransport(BASE, token="secret"):
+            pass
+
+
+def test_no_insecure_warning_for_https_remote() -> None:
+    # https encrypts the token in transit regardless of host.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", InsecureTransportWarning)
+        with RestTransport("https://192.168.1.100:8080", token="secret"):
+            pass
+
+
+def test_no_insecure_warning_without_token() -> None:
+    # Nothing sensitive to protect when no token is configured.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", InsecureTransportWarning)
+        with RestTransport(BASE_REMOTE):
+            pass
 
 
 def test_default_timeout() -> None:
