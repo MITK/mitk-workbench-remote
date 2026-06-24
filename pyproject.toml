@@ -33,20 +33,22 @@ dependencies = [
 
 [project.optional-dependencies]
 simpleitk = ["SimpleITK>=2.2"]
-mlarray = ["mlarray>=0.1"]
-mitk = ["mitk"]
+mlarray = ["mlarray>=0.0.53"]
+mitk = ["mitk-python"]
 # `layout` enables the typed mitk.mxn.layout DSL paths on MxNEditor
 # (get_layout, set_layout(MxNLayoutDocument | str | Path),
 # update_layout, apply_grid, apply_preset). Raw-dict layout I/O
 # (get_layout_json, set_layout(dict)) does not require this extra.
-layout = ["mitk"]
-all = ["SimpleITK>=2.2", "mlarray>=0.1", "mitk"]
+layout = ["mitk-python"]
+all = ["SimpleITK>=2.2", "mlarray>=0.0.53", "mitk-python"]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
     "responses>=0.23",
     "ruff",
     "mypy",
+    "build",
+    "twine",
 ]
 docs = [
     "sphinx",
@@ -61,12 +63,33 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/MITK/mitk-workbench-remote"
-Documentation = "https://docs.mitk.org/mitk-workbench-remote"
+Documentation = "https://mitk-workbench-remote.readthedocs.io"
 Repository = "https://github.com/MITK/mitk-workbench-remote"
 Issues = "https://github.com/MITK/mitk-workbench-remote/issues"
 
 [tool.hatch.version]
 path = "src/mitk_workbench_remote/_version.py"
+
+# Curate the sdist explicitly. Without an include list hatchling bundles
+# the whole project root, which would ship stray top-level files (design
+# notes, scratch scripts). The wheel only needs the package. Built docs and
+# notebook checkpoints are VCS-ignored, which hatchling honors even under an
+# explicit include, so docs/ ships sources only.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/contract",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mitk_workbench_remote"]
 
 [tool.ruff]
 target-version = "py310"

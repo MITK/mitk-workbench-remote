@@ -53,7 +53,7 @@ pip install mitk-workbench-remote[all]
 ## Development
 
 ```bash
-git clone <repo>
+git clone https://github.com/MITK/mitk-workbench-remote.git
 cd mitk-workbench-remote
 pip install -e ".[dev]"
 pytest
@@ -72,7 +72,7 @@ See [docs/examples/](docs/examples/) for Jupyter notebooks covering common workf
 
 ## Documentation
 
-Full documentation at [docs.mitk.org/mitk-workbench-remote](https://docs.mitk.org/mitk-workbench-remote).
+Full documentation at [mitk-workbench-remote.readthedocs.io](https://mitk-workbench-remote.readthedocs.io).
 
 ## Versioning
 

@@ -4,6 +4,21 @@ Thanks for considering contributing to mitk-workbench-remote!
 
 ---
 
+## Repository model
+
+The authoritative repository is hosted on GitLab (`git.dkfz.de`) and is the
+single source of truth. GitHub hosts a public mirror: its branches are pushed
+from GitLab and are read-only there, but its Issues and Pull Requests are open
+for collaboration.
+
+As a contributor you work entirely on GitHub: file bug reports and feature
+requests on GitHub Issues, and open pull requests against `develop`. Because the
+branches are mirrored from GitLab, an approved pull request is integrated by a
+maintainer on the GitLab side rather than through the GitHub "Merge" button; the
+result then mirrors back to GitHub.
+
+---
+
 ## Getting Started
 
 1. Fork & clone the repository:

@@ -49,10 +49,22 @@ autodoc_default_options = {
     "undoc-members": False,
 }
 
+# Read the Docs installs only the `.[docs]` extra, so the optional `mitk`,
+# `SimpleITK`, and `mlarray` packages are absent there. Mock them so autodoc
+# can import modules that reference these types without the real packages.
+autodoc_mock_imports = ["mitk", "SimpleITK", "mlarray"]
+
 # -- Napoleon (Google-style docstrings) --------------------------------
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
+
+# Render "Attributes:" sections as an :ivar: field list rather than separate
+# .. attribute:: directives. Our dataclasses and enums annotate their members,
+# which autodoc already documents; without this, napoleon emits a second
+# object description per member, producing duplicate-object warnings (fatal
+# under -W) and duplicated entries in the rendered output.
+napoleon_use_ivar = True
 
 # -- Type hints --------------------------------------------------------
 

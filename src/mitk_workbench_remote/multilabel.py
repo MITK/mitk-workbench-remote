@@ -18,12 +18,16 @@
 
 """MultiLabelSegmentation -- 4D label volume with group semantics.
 
-Classes:
-    MultiLabelSegmentation: Container of label groups backed by a 4D numpy array.
-        Label values are globally unique across all groups; value 0 is reserved.
-        Supports group-level image access, label properties editing, and value remapping.
-    LabelGroup: A named collection of labels within a MultiLabelSegmentation.
-    Label: A single label with value, name, color, opacity, visibility, and lock state.
+This module provides:
+
+- :class:`MultiLabelSegmentation`: Container of label groups backed by a 4D
+  numpy array. Label values are globally unique across all groups; value 0 is
+  reserved. Supports group-level image access, label properties editing, and
+  value remapping.
+- :class:`LabelGroup`: A named collection of labels within a
+  ``MultiLabelSegmentation``.
+- :class:`Label`: A single label with value, name, color, opacity, visibility,
+  and lock state.
 """
 
 from __future__ import annotations

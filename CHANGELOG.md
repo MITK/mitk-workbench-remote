@@ -12,5 +12,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.1.0]
+
 ### Added
-- Initial project scaffolding
+- `connect()` to attach to a running MITK Workbench, and a `Workbench.show()`
+  one-liner for files, numpy arrays, SimpleITK images, and mlarray objects.
+- `DataStorage` CRUD: list, filter, create, and remove data nodes.
+- `Image` universal spatial image type, with automatic transfer-mode negotiation
+  (direct HTTP or file-reference).
+- MultiLabel segmentation editing: groups, labels, pixel data, and full round-trip.
+- Editor and render-window handles for the StdMultiWidget and MxN editors, with
+  rendering control: crosshair position, reinit, and screenshots.
+- Typed MxN layout DSL (via the optional `mitk` package) alongside raw-dict
+  layout I/O that needs no optional dependency.
+- Converter registry for image types: numpy always available, SimpleITK and
+  mlarray auto-registered when installed, plus user-registerable converters.
+- Discovery and launch helpers to find running instances or start new ones.
+- Structured logging via Python's `logging` module.

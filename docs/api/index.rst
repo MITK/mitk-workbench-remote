@@ -12,6 +12,7 @@ This reference is auto-generated from the source code docstrings.
    node
    image
    multilabel
+   editors
    converters
    transport
    errors
