@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: mitk-workbench-remote
+abstract: "Python library for remote-controlling running MITK Workbench instances via their REST API."
+type: software
+authors:
+  - family-names: Floca
+    given-names: Ralf
+    affiliation: "German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)"
+    # orcid: "https://orcid.org/0000-0003-3218-3377"
+  # Add further named maintainers above this line, then the team entity below.
+  - name: "MITK Development Team"
+    affiliation: "German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)"
+license: Apache-2.0
+repository-code: "https://github.com/MITK/mitk-workbench-remote"
+url: "https://mitk-workbench-remote.readthedocs.io"
+version: 0.1.0
+# date-released: 2026-01-01  # set to the actual date when 0.1.0 is published
+keywords:
+  - MITK
+  - medical imaging
+  - REST API
+  - remote control
+  - segmentation
