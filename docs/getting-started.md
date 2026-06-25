@@ -21,6 +21,11 @@ With optional SimpleITK and mlarray converters:
 pip install mitk-workbench-remote[all]
 ```
 
+`[all]` (SimpleITK + mlarray) installs on all supported Python versions. The MITK
+interop and layout DSL require the `layout` (or `mitk`) extra and Python 3.12 — the
+`mitk-python` wheels are 3.12-only. Install everything on 3.12 with
+`pip install "mitk-workbench-remote[all,layout]"`.
+
 ## Connecting to a Workbench
 
 ```python

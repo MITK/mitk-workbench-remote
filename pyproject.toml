@@ -39,7 +39,7 @@ mitk = ["mitk-python"]
 # update_layout, apply_grid, apply_preset). Raw-dict layout I/O
 # (get_layout_json, set_layout(dict)) does not require this extra.
 layout = ["mitk-python"]
-all = ["SimpleITK>=2.2", "mlarray>=0.0.53", "mitk-python"]
+all = ["SimpleITK>=2.2", "mlarray>=0.0.53"]
 dev = [
     "pytest>=7.0",
     "pytest-cov",

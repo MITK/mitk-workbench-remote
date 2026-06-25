@@ -55,6 +55,15 @@ With optional image format support ([SimpleITK](https://simpleitk.org/) and [MLA
 pip install mitk-workbench-remote[all]
 ```
 
+`[all]` covers the image-format converters and installs on every supported Python
+(3.11+). The MITK interop and the typed MxN layout DSL need the `mitk` / `layout`
+extra, which depends on `mitk-python`; that package currently ships CPython 3.12
+wheels only, so those extras require Python 3.12. To install everything on 3.12:
+
+```bash
+pip install "mitk-workbench-remote[all,layout]"
+```
+
 ## Development
 
 ```bash
