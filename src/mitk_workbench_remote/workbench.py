@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import subprocess
 import sys
-import warnings
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote._win import _find_listening_pids, _kill_pid_tree
 from mitk_workbench_remote.node import DataNode
 from mitk_workbench_remote.storage import DataStorage
 from mitk_workbench_remote.transport import RestTransport, TransferMode
@@ -67,36 +68,6 @@ def _position_bounds_from_json(body: dict[str, Any]) -> PositionBounds:
         min_position=_xyz(raw_min) if raw_min is not None else None,
         max_position=_xyz(raw_max) if raw_max is not None else None,
     )
-
-
-def _find_listening_pid(port: int) -> int | None:
-    """Return the PID of the process listening on *port* (Windows only).
-
-    Parses ``netstat -ano -p TCP`` output.  Returns ``None`` when no
-    matching listener is found or if the command fails.
-    """
-    try:
-        result = subprocess.run(
-            ["netstat", "-ano", "-p", "TCP"],
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return None
-    for line in result.stdout.splitlines():
-        if "LISTENING" not in line:
-            continue
-        parts = line.strip().split()
-        # Format: Proto  LocalAddr  ForeignAddr  State  PID
-        if len(parts) < 5:
-            continue
-        local_addr = parts[1]
-        if local_addr.endswith(f":{port}"):
-            try:
-                return int(parts[-1])
-            except (ValueError, IndexError):
-                continue
-    return None
 
 
 @dataclass(frozen=True)
@@ -267,6 +238,8 @@ class Workbench:
         transport: Configured REST transport for the target instance.
         process: Optional subprocess handle when the instance was started
             via :func:`~mitk_workbench_remote.discovery.launch`.
+        stderr_log_path: Optional path to the temp file capturing the launched
+            child's stderr. Removed best-effort on :meth:`shutdown`.
     """
 
     def __init__(
@@ -274,9 +247,11 @@ class Workbench:
         transport: RestTransport,
         *,
         process: subprocess.Popen[bytes] | None = None,
+        stderr_log_path: str | None = None,
     ) -> None:
         self._transport = transport
         self._process = process
+        self._stderr_log_path = stderr_log_path
         self._info: WorkbenchInfo | None = None
         self._storage: DataStorage | None = None
         self._std_multi: StdMultiEditor | None = None
@@ -709,7 +684,8 @@ class Workbench:
         On Unix, sends ``SIGTERM`` to the subprocess and falls back to
         ``SIGKILL`` after 10 seconds.
 
-        Also closes the underlying transport session.
+        Removes the launch stderr temp file (if any) best-effort and closes
+        the underlying transport session.
 
         Raises:
             MitkError: If this instance was not created by ``launch()``. Use property
@@ -721,52 +697,32 @@ class Workbench:
         _log.info("[%s] Shutting down", self.url)
 
         if sys.platform == "win32":
-            # Find the process actually listening on the REST port — this may
-            # differ from self._process.pid when MITK is launched via a
-            # batch-script wrapper (cmd.exe -> MitkWorkbench.exe).
+            # The process actually listening on the REST port may differ from
+            # self._process.pid when MITK is launched via a batch-script wrapper
+            # (cmd.exe -> MitkWorkbench.exe). A dual-stack instance appears under
+            # both address families with the same PID and is deduped to a single kill.
             port = urlparse(self.url).port
-            listener_pid: int | None = None
-            if port is not None:
-                listener_pid = _find_listening_pid(port)
-                if listener_pid is not None:
-                    result = subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(listener_pid)],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if result.returncode != 0:
-                        warnings.warn(
-                            f"taskkill /PID {listener_pid} failed (code {result.returncode}): "
-                            f"{result.stderr.strip()}",
-                            RuntimeWarning,
-                            stacklevel=2,
-                        )
-            # Also kill the wrapper process tree, unless it IS the listener
-            # (no wrapper — MITK was started directly).
-            if listener_pid != self._process.pid:
-                result = subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(self._process.pid)],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode != 0:
-                    warnings.warn(
-                        f"taskkill /PID {self._process.pid} failed (code {result.returncode}): "
-                        f"{result.stderr.strip()}",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
+            listener_pids = _find_listening_pids(port) if port is not None else set()
+            for pid in listener_pids:
+                _kill_pid_tree(pid)
+            # Also kill the wrapper tree, unless it IS the listener (no wrapper —
+            # MITK was started directly).
+            if self._process.pid not in listener_pids:
+                _kill_pid_tree(self._process.pid)
         else:
             self._process.terminate()
 
-        # Use communicate() rather than wait() to drain the stderr pipe that
-        # launch() opens (stderr=PIPE).  wait() with an unread PIPE can
-        # deadlock when the subprocess fills the pipe buffer during shutdown.
+        # launch() redirects the child's stderr to a temp file (not a PIPE), so
+        # there is no pipe to drain and wait() cannot deadlock.
         try:
-            self._process.communicate(timeout=10)
+            self._process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self._process.kill()
-            self._process.communicate()
+            self._process.wait()
+
+        if self._stderr_log_path is not None:
+            with contextlib.suppress(OSError):
+                os.remove(self._stderr_log_path)
 
         self._transport.close()
 
@@ -795,6 +751,7 @@ def connect(
     token: str | None = None,
     timeout: float = 30.0,
     transfer_mode: str | None = None,
+    trust_env: bool | None = None,
 ) -> Workbench:
     """Connect to a running MITK Workbench REST server.
 
@@ -808,10 +765,18 @@ def connect(
         transfer_mode: Override transfer mode (``"direct"`` or
             ``"file-reference"``). When ``None`` the mode is auto-detected
             from server capabilities on first data request.
+        trust_env: Whether to honor environment proxy settings. When ``None``
+            (default) env proxies are bypassed for loopback URLs and honored
+            for remote hosts — a forward/corporate proxy cannot reach the
+            caller's own machine, so proxying a ``localhost`` request would
+            fail. Pass ``True`` to always honor env proxies or ``False`` to
+            never.
 
     Returns:
         A :class:`Workbench` handle ready for use.
     """
     _log.info("[%s] Connecting", url)
-    transport = RestTransport(url, token=token, timeout=timeout, transfer_mode=transfer_mode)
+    transport = RestTransport(
+        url, token=token, timeout=timeout, transfer_mode=transfer_mode, trust_env=trust_env
+    )
     return Workbench(transport)

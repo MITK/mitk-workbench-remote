@@ -96,6 +96,15 @@ def test_connect_no_http_on_construction() -> None:
     wb.close()
 
 
+def test_connect_forwards_trust_env() -> None:
+    # connect() must pass trust_env through to the transport unchanged. Asserting
+    # the kwarg at the constructor boundary avoids reaching into the two-level
+    # private chain (Workbench._transport._session.trust_env).
+    with patch("mitk_workbench_remote.workbench.RestTransport") as mock_transport:
+        connect(BASE, trust_env=False)
+    assert mock_transport.call_args.kwargs["trust_env"] is False
+
+
 # ---------------------------------------------------------------------------
 # url
 # ---------------------------------------------------------------------------
@@ -294,25 +303,24 @@ def test_shutdown_raises_for_connected_instance() -> None:
 def test_shutdown_terminates_process() -> None:
     mock_process: MagicMock = MagicMock(spec=subprocess.Popen)
     mock_process.pid = 12345
-    mock_process.communicate.return_value = (b"", b"")
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="")):
         wb.shutdown()
-    mock_process.communicate.assert_called()
+    mock_process.wait.assert_called()
     wb.close()
 
 
-def test_shutdown_kills_if_communicate_times_out() -> None:
+def test_shutdown_kills_if_wait_times_out() -> None:
     mock_process: MagicMock = MagicMock(spec=subprocess.Popen)
     mock_process.pid = 12345
-    mock_process.communicate.side_effect = [
+    mock_process.wait.side_effect = [
         subprocess.TimeoutExpired(cmd="mitk", timeout=10),
-        (b"", b""),  # after kill()
+        0,  # after kill()
     ]
     t = _make_transport()
     wb = Workbench(t, process=mock_process)  # type: ignore[arg-type]
-    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="")):
         wb.shutdown()
     mock_process.kill.assert_called_once()
     wb.close()

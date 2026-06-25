@@ -167,6 +167,42 @@ def test_explicit_transfer_mode_not_auto_detected() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Proxy bypass for loopback (trust_env)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://[::1]:8080",
+    ],
+)
+def test_trust_env_disabled_for_loopback(url: str) -> None:
+    # A forward/corporate proxy cannot route to the caller's own machine, so env
+    # proxies must be ignored for loopback targets by default.
+    with RestTransport(url) as t:
+        assert t._session.trust_env is False
+
+
+def test_trust_env_enabled_for_remote() -> None:
+    # Remote hosts keep honoring the system/env proxy.
+    with RestTransport("http://remote.example:8080") as t:
+        assert t._session.trust_env is True
+
+
+def test_trust_env_explicit_true_overrides_loopback_default() -> None:
+    with RestTransport(BASE, trust_env=True) as t:
+        assert t._session.trust_env is True
+
+
+def test_trust_env_explicit_false_overrides_remote_default() -> None:
+    with RestTransport(BASE_REMOTE, trust_env=False) as t:
+        assert t._session.trust_env is False
+
+
+# ---------------------------------------------------------------------------
 # HTTP methods — happy path
 # ---------------------------------------------------------------------------
 

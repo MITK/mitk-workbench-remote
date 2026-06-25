@@ -18,11 +18,14 @@
 
 """Tests for discovery.py."""
 
+import contextlib
+import glob
 import os
 import re
 import socket
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -32,6 +35,7 @@ import requests
 import responses
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote._win import _find_listening_pids
 from mitk_workbench_remote.discovery import (
     _EXECUTABLE_ENV_VAR,
     _PREFERENCE_PATCH_FLAG,
@@ -44,6 +48,23 @@ from mitk_workbench_remote.workbench import Workbench
 
 def _api(port: int, path: str) -> str:
     return f"http://localhost:{port}/api/v1{path}"
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_launch_stderr_logs():
+    """Remove stderr temp files leaked by launch() success-path tests.
+
+    launch() now writes the child's stderr to a ``mitk_stderr_*.log`` temp file
+    that only shutdown() deletes; tests that call close() (or never shut down)
+    would otherwise litter the temp dir. Only files appearing during the test
+    are removed, so unrelated files are never touched.
+    """
+    pattern = os.path.join(tempfile.gettempdir(), "mitk_stderr_*.log")
+    before = set(glob.glob(pattern))
+    yield
+    for path in set(glob.glob(pattern)) - before:
+        with contextlib.suppress(OSError):
+            os.remove(path)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +236,6 @@ def test_launch_spawns_process_with_correct_args(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="mytoken", timeout=5.0)
 
@@ -247,7 +267,6 @@ def test_launch_prefs_xml_built_with_correct_port_and_token(tmp_path: Path) -> N
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="tok123", timeout=5.0)
 
@@ -275,7 +294,6 @@ def test_launch_auto_generates_token(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, timeout=5.0)
 
@@ -304,7 +322,6 @@ def test_launch_uses_explicit_token(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="explicit-token", timeout=5.0)
 
@@ -332,7 +349,6 @@ def test_launch_uses_explicit_port(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, timeout=5.0)
 
@@ -358,7 +374,6 @@ def test_launch_extra_args_appended_to_cmd(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="tok", timeout=5.0, extra_args=["--no-gui", "--debug"])
 
@@ -384,19 +399,159 @@ def test_launch_returns_workbench_with_process(tmp_path: Path) -> None:
 
     mock_proc = MagicMock(spec=subprocess.Popen)
     mock_proc.poll.return_value = None
-    mock_proc.communicate.return_value = (b"", b"")
     mock_proc.pid = 12345
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
-        patch("subprocess.run", return_value=MagicMock(returncode=0)),
+        patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="")),
     ):
         wb = launch(exe, port=port, token="tok", timeout=5.0)
 
     assert isinstance(wb, Workbench)
     # Verify it is a launched instance via public behaviour: shutdown() must not raise
-    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
+    with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="")):
         wb.shutdown()  # also closes transport
+
+
+# ---------------------------------------------------------------------------
+# launch() — wrapper exit-0 tolerance and child stderr handling
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_launch_tolerates_wrapper_exit_zero_then_becomes_healthy(tmp_path: Path) -> None:
+    """The shipped .bat ``start /B``-detaches the real exe and exits 0 within
+    ~0.1s. launch() must tolerate exit-0 and keep polling /health instead of
+    treating the wrapper's exit as a fatal failure."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8085
+
+    responses.add(
+        responses.GET,
+        _api(port, "/health"),
+        json={"data": {"status": "healthy"}},
+        status=200,
+    )
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = 0  # wrapper has already exited 0
+    mock_proc.pid = 12345
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+    ):
+        wb = launch(exe, port=port, token="tok", timeout=5.0)
+
+    assert isinstance(wb, Workbench)
+    wb.close()
+
+
+@responses.activate
+def test_launch_redirects_child_stderr_to_closed_file_not_pipe(tmp_path: Path) -> None:
+    """stderr must be a real file handle (never PIPE, which the detached exe
+    would hold open and deadlock on), and the parent closes its own copy
+    immediately after Popen."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8084
+
+    responses.add(
+        responses.GET,
+        _api(port, "/health"),
+        json={"data": {"status": "healthy"}},
+        status=200,
+    )
+
+    captured: dict[str, object] = {}
+
+    def _capture_popen(cmd, **kwargs):
+        captured["stderr"] = kwargs.get("stderr")
+        # No spec=subprocess.Popen here: inside the patch, subprocess.Popen IS the
+        # mock, and a Mock cannot spec another Mock.
+        m = MagicMock()
+        m.poll.return_value = None
+        m.pid = 12345
+        return m
+
+    with (
+        patch("subprocess.Popen", side_effect=_capture_popen),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+    ):
+        wb = launch(exe, port=port, token="tok", timeout=5.0)
+
+    stderr_obj = captured["stderr"]
+    assert stderr_obj is not subprocess.PIPE
+    assert hasattr(stderr_obj, "write")  # a writable file object, not a pipe sentinel
+    assert stderr_obj.closed is True  # parent closed its handle after Popen
+    wb.close()
+
+
+@responses.activate
+def test_launch_timeout_zero_still_probes_once(tmp_path: Path) -> None:
+    """timeout=0 must still perform exactly one /health probe before giving up."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8083
+
+    probe_count = 0
+
+    def _refuse(request):
+        nonlocal probe_count
+        probe_count += 1
+        raise requests.exceptions.ConnectionError("refused")
+
+    responses.add_callback(responses.GET, _api(port, "/health"), callback=_refuse)
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = None
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners"),
+        pytest.raises(errors.MitkConnectionError),
+    ):
+        launch(exe, port=port, token="tok", timeout=0)
+
+    assert probe_count == 1
+
+
+@responses.activate
+def test_launch_never_healthy_names_early_exit_and_kills_listeners(tmp_path: Path) -> None:
+    """A never-healthy launch whose wrapper exited 0 fails at the deadline with a
+    message naming the early exit, kills the (detached) port listener so it is
+    not orphaned, and removes the stderr temp file."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8082
+
+    def _refuse(request):
+        raise requests.exceptions.ConnectionError("refused")
+
+    responses.add_callback(responses.GET, _api(port, "/health"), callback=_refuse)
+
+    # Transparent spy on mkstemp to capture the real stderr (.log) path so we can
+    # assert the failure-path cleanup removed it (the file was opened from an fd,
+    # so the file object's .name is the fd number, not a usable path).
+    real_mkstemp = tempfile.mkstemp
+    stderr_paths: list[str] = []
+
+    def _spy_mkstemp(*args, **kwargs):
+        fd, path = real_mkstemp(*args, **kwargs)
+        if kwargs.get("suffix") == ".log":
+            stderr_paths.append(path)
+        return fd, path
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = 0  # exited 0, but /health never comes up
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners") as mock_kill,
+        patch("tempfile.mkstemp", side_effect=_spy_mkstemp),
+        pytest.raises(errors.MitkConnectionError, match=r"already exited \(code 0\)"),
+    ):
+        launch(exe, port=port, token="tok", timeout=0)
+
+    mock_kill.assert_called_once_with(port)
+    assert stderr_paths, "stderr temp file was never created"
+    assert not os.path.exists(stderr_paths[0]), "stderr temp file leaked on failed launch"
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +578,6 @@ def test_launch_uses_env_var_when_no_executable_given(tmp_path: Path) -> None:
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(port=port, token="tok", timeout=5.0)
 
@@ -453,7 +607,6 @@ def test_launch_explicit_path_takes_precedence_over_env_var(tmp_path: Path) -> N
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        mock_proc.stderr.read.return_value = b""
         mock_popen.return_value = mock_proc
         wb = launch(exe_explicit, port=port, token="tok", timeout=5.0)
 
@@ -497,12 +650,14 @@ def test_launch_timeout_terminates_process_and_raises_ConnectionError(tmp_path: 
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners") as mock_kill,
         patch("time.sleep"),  # Speed up the loop
-        pytest.raises(errors.MitkConnectionError, match="did not start"),
+        pytest.raises(errors.MitkConnectionError, match="did not become reachable"),
     ):
         launch(exe, port=port, token="tok", timeout=0.1)
 
     mock_proc.terminate.assert_called_once()
+    mock_kill.assert_called_once_with(port)
 
 
 @responses.activate
@@ -523,6 +678,7 @@ def test_launch_non_connection_error_propagates_immediately(tmp_path: Path) -> N
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners"),
         pytest.raises(errors.AuthenticationError),
     ):
         launch(exe, port=port, token="tok", timeout=5.0)
@@ -539,11 +695,15 @@ def test_launch_cannot_apply_preferences_raises_descriptive_error(tmp_path: Path
     exe = _make_fake_exe(tmp_path)
     mock_proc = MagicMock()
     mock_proc.poll.return_value = 1
-    mock_proc.stderr.read.return_value = b"Cannot apply preferences for org.mitk.restapi\n"
 
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch(
+            "mitk_workbench_remote.discovery._read_launch_stderr",
+            return_value="Cannot apply preferences for org.mitk.restapi\n",
+        ),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners"),
         pytest.raises(errors.MitkError, match="manually once"),
     ):
         launch(exe, port=8087, token="tok", timeout=5.0)
@@ -555,11 +715,15 @@ def test_launch_unexpected_process_exit_raises_mitk_error(tmp_path: Path) -> Non
     exe = _make_fake_exe(tmp_path)
     mock_proc = MagicMock()
     mock_proc.poll.return_value = 1
-    mock_proc.stderr.read.return_value = b"Segmentation fault\n"
 
     with (
         patch("subprocess.Popen", return_value=mock_proc),
         patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch(
+            "mitk_workbench_remote.discovery._read_launch_stderr",
+            return_value="Segmentation fault\n",
+        ),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners"),
         pytest.raises(errors.MitkError, match="unexpectedly"),
     ):
         launch(exe, port=8086, token="tok", timeout=5.0)
@@ -586,10 +750,11 @@ def test_shutdown_wrapper_kills_both_listener_and_wrapper(tmp_path: Path) -> Non
 
     mock_proc = MagicMock(spec=subprocess.Popen)
     mock_proc.poll.return_value = None
-    mock_proc.communicate.return_value = (b"", b"")
     mock_proc.pid = 12345
 
-    # Simulate netstat: listener PID (99999) differs from wrapper PID (12345)
+    # Simulate netstat: listener PID (99999) differs from wrapper PID (12345).
+    # The state column is irrelevant to the parser (it keys on the wildcard
+    # foreign address), so the same line answers both the TCP and TCPv6 scans.
     netstat_output = (
         f"  TCP    127.0.0.1:{port}         0.0.0.0:0              LISTENING       99999\n"
     )
@@ -608,7 +773,7 @@ def test_shutdown_wrapper_kills_both_listener_and_wrapper(tmp_path: Path) -> Non
         wb = launch(exe, port=port, token="tok", timeout=5.0)
         wb.shutdown()
 
-    mock_proc.communicate.assert_called()
+    mock_proc.wait.assert_called()
 
     if sys.platform == "win32":
         taskkill_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"]
@@ -638,10 +803,10 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
 
     mock_proc = MagicMock(spec=subprocess.Popen)
     mock_proc.poll.return_value = None
-    mock_proc.communicate.return_value = (b"", b"")
     mock_proc.pid = 55555
 
-    # Simulate netstat: listener PID matches Popen PID (same process)
+    # Simulate netstat: listener PID matches Popen PID (same process). The same
+    # line answers both the TCP and TCPv6 scans and dedups to a single PID.
     netstat_output = (
         f"  TCP    127.0.0.1:{port}         0.0.0.0:0              LISTENING       55555\n"
     )
@@ -660,7 +825,7 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
         wb = launch(exe, port=port, token="tok", timeout=5.0)
         wb.shutdown()
 
-    mock_proc.communicate.assert_called()
+    mock_proc.wait.assert_called()
 
     if sys.platform == "win32":
         taskkill_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "taskkill"]
@@ -671,6 +836,84 @@ def test_shutdown_direct_launch_kills_listener_only(tmp_path: Path) -> None:
         mock_proc.terminate.assert_called_once()
 
     wb.close()
+
+
+@responses.activate
+def test_shutdown_removes_stderr_temp_file(tmp_path: Path) -> None:
+    """The stderr temp file created by launch() is deleted on shutdown()."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8086
+
+    responses.add(
+        responses.GET,
+        _api(port, "/health"),
+        json={"data": {"status": "healthy"}},
+        status=200,
+    )
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = None
+    mock_proc.pid = 12345
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+    ):
+        wb = launch(exe, port=port, token="tok", timeout=5.0)
+
+    stderr_path = wb._stderr_log_path
+    assert stderr_path is not None
+    assert os.path.exists(stderr_path)
+
+    with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="")):
+        wb.shutdown()
+
+    assert not os.path.exists(stderr_path)
+
+
+# ---------------------------------------------------------------------------
+# _find_listening_pids() — locale- and address-family-independent lookup
+# ---------------------------------------------------------------------------
+
+
+def _netstat_per_proto(*, tcp: str = "", tcpv6: str = ""):
+    """Build a subprocess.run side-effect that answers per ``-p`` proto arg."""
+
+    def _side_effect(cmd, **kwargs):
+        proto = cmd[cmd.index("-p") + 1]
+        return MagicMock(stdout=tcp if proto == "TCP" else tcpv6)
+
+    return _side_effect
+
+
+def test_find_listening_pids_locale_independent() -> None:
+    # German Windows prints ABHÖREN, not LISTENING. The parser keys on the
+    # wildcard foreign address (:0), so the localized state word is irrelevant.
+    tcp = "  TCP    0.0.0.0:8080    0.0.0.0:0    ABHÖREN    4242\n"
+    with patch("subprocess.run", side_effect=_netstat_per_proto(tcp=tcp)):
+        assert _find_listening_pids(8080) == {4242}
+
+
+def test_find_listening_pids_finds_tcpv6_only_listener() -> None:
+    tcpv6 = "  TCP    [::]:8080    [::]:0    LISTENING    4242\n"
+    with patch("subprocess.run", side_effect=_netstat_per_proto(tcpv6=tcpv6)):
+        assert _find_listening_pids(8080) == {4242}
+
+
+def test_find_listening_pids_ignores_established_rows() -> None:
+    # An established connection whose local port matches has a real foreign
+    # address (not :0) and must not be mistaken for a listener.
+    tcp = "  TCP    127.0.0.1:8080    93.184.216.34:443    ESTABLISHED    1111\n"
+    with patch("subprocess.run", side_effect=_netstat_per_proto(tcp=tcp)):
+        assert _find_listening_pids(8080) == set()
+
+
+def test_find_listening_pids_dedups_dual_stack_instance() -> None:
+    # A single dual-stack instance appears under both families with the SAME
+    # PID; the two-family merge must collapse to one.
+    tcp = "  TCP    0.0.0.0:8080    0.0.0.0:0    LISTENING    7777\n"
+    tcpv6 = "  TCP    [::]:8080    [::]:0    LISTENING    7777\n"
+    with patch("subprocess.run", side_effect=_netstat_per_proto(tcp=tcp, tcpv6=tcpv6)):
+        assert _find_listening_pids(8080) == {7777}
 
 
 # ---------------------------------------------------------------------------

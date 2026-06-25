@@ -31,3 +31,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Structured logging via Python's `logging` module.
 - `InsecureTransportWarning` when an API token is configured for a non-local
   `http://` host, since the `Authorization` header would travel in cleartext.
+- Automatic environment-proxy bypass for loopback connections (a forward proxy
+  cannot route to the caller's own machine), with a `trust_env` parameter on
+  `connect()` to override it.
+
+### Fixed
+- `launch()` no longer mistakes the Windows `.bat` wrapper's immediate exit-0
+  for a failure: it tolerates exit-0 and keeps polling `/health` (only a
+  non-zero exit fails fast).
+- `shutdown()` finds the listening process locale- and address-family-
+  independently (no longer keyed on the English word `LISTENING`), so it kills
+  the real Workbench on non-English Windows and for dual-stack listeners.
+- The launched child's stderr is redirected to a temp file instead of an
+  inherited PIPE, removing a deadlock risk over long sessions; the file is
+  cleaned up on `shutdown()` and on failed launches.

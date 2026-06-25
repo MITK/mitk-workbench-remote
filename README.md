@@ -23,6 +23,11 @@ wb.show("scan.nrrd", opacity=0.8)
 wb.show(my_array, name="Prediction", color=(1.0, 0.5, 0.0))
 ```
 
+Connections to a loopback host (`localhost`, `127.0.0.1`, `::1`) ignore the
+environment proxy settings by default, since a forward/corporate proxy cannot
+route to your own machine. Pass `trust_env=True` (or `False`) to `connect()` to
+override this.
+
 ## Features
 
 - **`wb.show()` one-liner** for files, numpy arrays, SimpleITK images, and mlarray objects

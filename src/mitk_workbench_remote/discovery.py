@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from mitk_workbench_remote import errors
+from mitk_workbench_remote._win import _kill_port_listeners
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench
 
@@ -146,6 +147,17 @@ def _find_free_port(start: int = 8080, end: int = 8100) -> int:
     raise errors.MitkError(f"No free port in {start}-{end}")
 
 
+def _read_launch_stderr(path: str | os.PathLike[str]) -> str:
+    """Best-effort read of the launch stderr log (utf-8, errors replaced).
+
+    Returns '' if the file is missing or unreadable.
+    """
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def launch(
     executable: str | Path | None = None,
     *,
@@ -159,6 +171,21 @@ def launch(
     Spawns the process, waits for the REST server to become healthy, and
     returns a connected :class:`~mitk_workbench_remote.workbench.Workbench`
     handle.
+
+    On Windows the shipped launcher is a ``.bat`` wrapper that ``start /B``
+    detaches the real ``MitkWorkbench.exe``; the tracked ``cmd.exe`` then
+    exits 0 within ~0.1 s, long before the REST server is up. ``launch()``
+    therefore tolerates an exit code of 0 and keeps polling ``/health``; only
+    a non-zero exit is treated as an immediate failure. The trade-off: a
+    direct executable that genuinely exits 0 right away (e.g. ``--help``) is
+    not detected until the ``timeout`` deadline rather than instantly.
+
+    The child's stderr is redirected to a temp file (never an inherited PIPE,
+    which the detached exe would hold open and deadlock on). On success the
+    file is removed by :meth:`~mitk_workbench_remote.workbench.Workbench.shutdown`;
+    on a failed launch it is removed before raising. Any failure also kills the
+    process listening on ``port`` (the detached exe), since a raised
+    ``launch()`` returns no handle for the caller to clean up later.
 
     Args:
         executable: Path to the MITK Workbench executable. When ``None``,
@@ -212,6 +239,23 @@ def launch(
     _log.info("Launching workbench: %s on port %d", resolved_exe, port)
 
     fd, prefs_path = tempfile.mkstemp(suffix=".xml", prefix="mitk_prefs_")
+    stderr_path: str | None = None
+    process: subprocess.Popen[bytes] | None = None
+    transport: RestTransport | None = None
+
+    def _abort() -> None:
+        """Tear down a FAILED launch: kill the detached real exe (port-keyed) and the
+        (already-dead) wrapper, close the transport, drop the stderr temp file. A raised
+        launch() returns no handle, so the caller cannot clean up later."""
+        _kill_port_listeners(port)
+        if process is not None:
+            process.terminate()
+        if transport is not None:
+            transport.close()
+        if stderr_path is not None:
+            with contextlib.suppress(OSError):
+                os.remove(stderr_path)
+
     try:
         with os.fdopen(fd, "w", encoding="UTF-8") as f:
             f.write(_build_prefs_xml(port, token))
@@ -222,53 +266,77 @@ def launch(
         if extra_args:
             cmd.extend(extra_args)
 
-        process: subprocess.Popen[bytes] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        # stderr -> temp file, NOT PIPE. `start /B` hands the inherited handle to the
+        # detached exe, which holds it for its whole life; an unread PIPE then blocks any
+        # parent read AND deadlocks the exe once its 64 KB buffer fills. A file has neither
+        # problem and preserves the exe's "Cannot apply preferences" diagnostic.
+        stderr_fd, stderr_path = tempfile.mkstemp(suffix=".log", prefix="mitk_stderr_")
+        stderr_file = os.fdopen(stderr_fd, "wb")
+        try:
+            process = subprocess.Popen(cmd, stderr=stderr_file)
+        finally:
+            # Popen inherited its own copy; close the parent's so we don't leak a
+            # descriptor. The child keeps writing through its inherited handle.
+            stderr_file.close()
 
         transport = RestTransport(f"http://localhost:{port}", token=token)
 
-        # Health poll loop: always attempt at least one probe even for timeout=0.
-        # On any non-connection exception the process is terminated before re-raising.
+        # The shipped MITK launcher is a .bat that `start /B`-detaches the real exe, so the
+        # tracked cmd.exe exits 0 within ~0.1 s — long before the REST server is up. Tolerate
+        # exit-0 and keep polling /health; only a NON-ZERO exit is an immediate hard failure
+        # (a direct-exe crash). Always attempt at least one probe even for timeout=0.
         deadline = time.monotonic() + timeout
         last_exc: Exception | None = None
-        try:
-            while True:
-                returncode = process.poll()
-                if returncode is not None:
-                    if returncode != 0:
-                        assert process.stderr is not None  # always piped (stderr=subprocess.PIPE)
-                        stderr_text = process.stderr.read().decode("utf-8", errors="replace")
-                        if "Cannot apply preferences" in stderr_text:
-                            raise errors.MitkError(
-                                f"MITK Workbench exited with code {returncode}: failed to apply "
-                                "preference overrides. If this is a fresh installation, please"
-                                " start the Workbench manually once to initialise its"
-                                " preferences store, then try again."
-                            )
-                        raise errors.MitkError(
-                            f"MITK Workbench process exited unexpectedly with code {returncode}."
-                        )
+        while True:
+            returncode = process.poll()
+            if returncode is not None and returncode != 0:
+                # Genuine failure — only reachable for a direct-exe launch (the .bat wrapper
+                # always exits 0). The exe has exited and released the stderr file, so reading
+                # it is safe and surfaces real diagnostics.
+                stderr_text = _read_launch_stderr(stderr_path)
+                if "Cannot apply preferences" in stderr_text:
                     raise errors.MitkError(
-                        "MITK Workbench process exited unexpectedly with code 0."
+                        f"MITK Workbench exited with code {returncode}: failed to apply "
+                        "preference overrides. If this is a fresh installation, please start "
+                        "the Workbench manually once to initialise its preferences store, "
+                        "then try again."
                     )
-                try:
-                    transport.get("/health")
-                    return Workbench(transport, process=process)
-                except errors.MitkConnectionError as exc:
-                    last_exc = exc
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.5)
-        except BaseException:
-            process.terminate()
-            transport.close()
-            raise
+                raise errors.MitkError(
+                    f"MITK Workbench process exited unexpectedly with code {returncode}."
+                )
+            try:
+                transport.get("/health")
+                return Workbench(transport, process=process, stderr_log_path=stderr_path)
+            except errors.MitkConnectionError as exc:
+                last_exc = exc
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
 
-        # Deadline expired — clean up
-        process.terminate()
-        transport.close()
+        # Deadline expired. Name the early-exit case and surface the prefs diagnostic (safe
+        # now that stderr is a file, not a still-live PIPE).
+        exited = process.poll()
+        diag = _read_launch_stderr(stderr_path)
+        if "Cannot apply preferences" in diag:
+            raise errors.MitkError(
+                f"MITK Workbench failed to apply preference overrides (process exited with "
+                f"code {exited}). If this is a fresh installation, please start the Workbench "
+                "manually once to initialise its preferences store, then try again."
+            )
+        detail = (
+            f"the launched process already exited (code {exited}) and "
+            if exited is not None
+            else ""
+        )
         raise errors.MitkConnectionError(
-            f"Workbench did not start within {timeout}s"
+            f"Workbench did not become reachable on port {port} within {timeout}s; "
+            f"{detail}check that the Workbench actually started."
         ) from last_exc
+    except BaseException:
+        # Any failure after the detached exe may already be listening (incl. KeyboardInterrupt,
+        # and the raises above). Kill the real listener too, not just the dead wrapper.
+        _abort()
+        raise
     finally:
         with contextlib.suppress(OSError):
             os.remove(prefs_path)

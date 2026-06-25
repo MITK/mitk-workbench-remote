@@ -208,6 +208,13 @@ class RestTransport:
             mode is auto-detected on first access via server capabilities.
             A plain string is accepted for convenience; an unrecognised value
             raises ``ValueError`` immediately.
+        trust_env: Whether to honor environment proxy settings
+            (``HTTP_PROXY`` / ``HTTPS_PROXY`` / ``NO_PROXY``), the env CA bundle,
+            and ``.netrc``. When ``None`` (default) this is decided automatically:
+            ``False`` for loopback targets (a forward/corporate proxy cannot route
+            to the caller's own machine, so honoring it would send the request to
+            the proxy, which typically rejects it with a 403), ``True`` for remote
+            hosts. Pass ``True`` to always honor env proxies or ``False`` to never.
     """
 
     def __init__(
@@ -217,9 +224,17 @@ class RestTransport:
         token: str | None = None,
         timeout: float = 30.0,
         transfer_mode: TransferMode | str | None = None,
+        trust_env: bool | None = None,
     ) -> None:
         self._session = requests.Session()
         self._base_url = base_url.rstrip("/")
+        # A corporate/forward proxy cannot route to the caller's own machine; honoring
+        # HTTP(S)_PROXY for a loopback target sends the request to the proxy, which
+        # rejects it (e.g. 403). Bypass env proxies for loopback; honor them for remote.
+        if trust_env is None:
+            self._session.trust_env = not self._is_localhost()
+        else:
+            self._session.trust_env = trust_env
         if token:
             self._session.headers["Authorization"] = f"Bearer {token}"
             if urllib.parse.urlparse(self._base_url).scheme == "http" and not self._is_localhost():
