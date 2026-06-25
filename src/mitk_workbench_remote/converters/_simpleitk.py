@@ -62,7 +62,9 @@ class SitkConverter:
         return properties
 
     def to_ndarray(self, obj: Any) -> np.ndarray:
-        return sitk.GetArrayFromImage(obj)
+        # GetArrayFromImage already returns an ndarray; asarray is a no-op coercion
+        # that makes the type concrete for mypy (SimpleITK is untyped -> Any).
+        return np.asarray(sitk.GetArrayFromImage(obj))
 
     def to_nrrd_bytes(self, obj: Any) -> bytes:
         from mitk_workbench_remote._io.nrrd import write_nrrd

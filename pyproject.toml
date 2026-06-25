@@ -11,7 +11,7 @@ dynamic = ["version"]
 description = "Remote control for MITK Workbench from Python"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "MITK Development Team", email = "mitk@dkfz.de" },
 ]
@@ -20,7 +20,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
     "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -108,7 +107,10 @@ select = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+# Target 3.12 (one above the 3.11 project minimum): numpy >=2.5 ships PEP 695
+# "type" statements in its stubs, which mypy only accepts when targeting 3.12+.
+# Runtime support for Python 3.11 is covered by the pytest matrix in .gitlab-ci.yml.
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

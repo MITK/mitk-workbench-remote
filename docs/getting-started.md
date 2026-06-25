@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Python 3.10+**
+- **Python 3.11+**
 - A running **MITK Workbench** instance with the REST API enabled.
   In the Workbench, go to *Window > Preferences > REST API*, check *Enable*
   and *Auto-start*, then restart.
