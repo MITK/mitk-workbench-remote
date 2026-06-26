@@ -82,7 +82,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 ## Examples
 
-See [docs/examples/](docs/examples/) for Jupyter notebooks covering common workflows.
+Runnable Jupyter notebooks live in
+[`docs/examples/`](https://github.com/MITK/mitk-workbench-remote/tree/main/docs/examples)
+(clone the repo or download the folder). They require a running MITK Workbench.
+Rendered versions: https://mitk-workbench-remote.readthedocs.io
 
 ## Documentation
 
