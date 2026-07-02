@@ -48,6 +48,10 @@ dev = [
     "mypy",
     "build",
     "twine",
+    # Notebook by-mode integration smoke test (tests/test_integration/test_notebooks.py)
+    "nbclient>=0.7",
+    "nbformat>=5.1",
+    "ipykernel",
 ]
 docs = [
     "sphinx",

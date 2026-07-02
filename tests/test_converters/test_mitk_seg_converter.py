@@ -64,7 +64,9 @@ def _make_mitk_seg() -> "mitk.MultiLabelSegmentation":
     tumor = mitk.Label(3, "Tumor")
     tumor.color = (1.0, 0.1, 0.1)
     tumor.locked = True
-    seg.add_group(None, [tumor])
+    # Native add_group(name, image, labels): pass labels by keyword so they do
+    # not land in the positional image slot.
+    seg.add_group(None, labels=[tumor])
 
     # Paint simple pixel data so round-trips have non-trivial content.
     # Use as_numpy() which returns a writeable view; np.asarray / .array

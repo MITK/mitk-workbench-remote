@@ -49,6 +49,7 @@ from mitk_workbench_remote.editors import (
 )
 from mitk_workbench_remote.errors import (
     EditorNotActiveError,
+    MitkApiDivergenceWarning,
     RenderingError,
     RenderWindowNotFoundError,
     UnsupportedDataTypeError,
@@ -88,6 +89,7 @@ __all__ = [
     "InsecureTransportWarning",
     "Label",
     "LabelGroup",
+    "MitkApiDivergenceWarning",
     "MultiLabelSegmentation",
     "MxNEditor",
     "MxNRenderWindow",
