@@ -1074,7 +1074,10 @@ class MultiLabelSegmentation:
 
         # Seeding needs the group to exist (set_group_image/add_label take an
         # index), so it happens after the append; roll back if it raises.
+        # set_group_image may set self._shape on a previously-shapeless
+        # segmentation, so capture and restore it alongside the labels.
         labels_before = set(self._labels)
+        shape_before = self._shape
         try:
             if image is not None:
                 self.set_group_image(index, image)
@@ -1086,6 +1089,7 @@ class MultiLabelSegmentation:
             del self._group_images[index]
             for v in set(self._labels) - labels_before:
                 del self._labels[v]
+            self._shape = shape_before
             raise
         return index
 
