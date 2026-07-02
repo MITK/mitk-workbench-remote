@@ -1524,7 +1524,7 @@ class TestGetDataWithMitk:
         ref = mitk.Image.from_numpy(np.zeros((3, 4, 5), dtype=np.uint16), spacing=(1.0, 1.0, 1.0))
         mitk_seg = mitk.MultiLabelSegmentation(ref)
         lbl = mitk.Label(1, "Organ")
-        mitk_seg.add_group(None, [lbl])
+        mitk_seg.add_group(None, labels=[lbl])
 
         node.set_data(mitk_seg)
         assert len(responses.calls) == 1
