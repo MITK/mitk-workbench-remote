@@ -161,6 +161,32 @@ def test_image_unsupported_type_raises_TypeError() -> None:
         Image(object())
 
 
+def test_image_unsupported_type_message_enumerates_accepted_inputs() -> None:
+    with pytest.raises(TypeError) as excinfo:
+        Image(object())
+    msg = str(excinfo.value)
+    assert "No converter found" in msg
+    # The message must point the way forward by naming what IS accepted.
+    for accepted in ("SimpleITK.Image", "mitk.Image", "mlarray.MLArray", "register_converter"):
+        assert accepted in msg, f"expected {accepted!r} in TypeError message: {msg!r}"
+
+
+def test_image_unsupported_mitk_type_does_not_steer_to_as_type_remote() -> None:
+    # A native non-image mitk type (e.g. mitk.PointSet) hits this same branch.
+    # The message must NOT advise get_data(as_type=REMOTE): such nodes have no
+    # remote Image (they raise UnsupportedDataTypeError), so that advice would
+    # misdirect. The constructor cannot infer get_data provenance from the type.
+    class _FakeMitkPointSet:
+        pass
+
+    with pytest.raises(TypeError) as excinfo:
+        Image(_FakeMitkPointSet())
+    msg = str(excinfo.value)
+    assert "No converter found" in msg
+    assert "as_type" not in msg
+    assert "REMOTE" not in msg
+
+
 # ---------------------------------------------------------------------------
 # Conversion methods
 # ---------------------------------------------------------------------------

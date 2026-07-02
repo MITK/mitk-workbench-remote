@@ -59,6 +59,36 @@ mitk_image = node.get_data(as_type=mw.DataRepresentation.MITK)
 - `REMOTE` — pixel data is also copied (from NRRD), but the `mw.Image` wrapper
   is lighter and has no dependency on the `mitk` package.
 
+## Representation-specific methods (the AUTO footgun)
+
+Under `AUTO`, `get_data()` hands you a native `mitk.Image` when `mitk` is
+installed and an `mw.Image` otherwise. The two share the spatial and property
+surface (`array`/`as_numpy`, `shape`, `spacing`, `origin`, `direction`,
+`properties`, and `isinstance(img, SpatialImage)`), so most code runs unchanged
+in both modes.
+
+They do not share the remote-only conversion helpers. These exist only on
+`mw.Image`: `to_simpleitk()`, `to_mlarray()`, `to_mitk()`, and `to_numpy()`. A
+native `mitk.Image` has none of them (use `as_numpy()` or `np.asarray()` for the
+array). So the following works when `mitk` is absent and raises `AttributeError`
+when it is present:
+
+```python
+sitk = node.get_data().to_simpleitk()   # AttributeError under AUTO + mitk
+```
+
+Request the remote wrapper explicitly whenever you need a representation-specific
+method:
+
+```python
+sitk = node.get_data(as_type=mw.DataRepresentation.REMOTE).to_simpleitk()
+```
+
+Calling `to_simpleitk()` directly on a native `mitk.Image` raises a plain
+`AttributeError` from Python. The remote client cannot turn that into a friendlier
+error because it does not own the native `mitk.Image` type; `as_type=REMOTE` is
+the fix.
+
 ## Uploading back
 
 `DataNode.set_data()` accepts any object handled by the converter registry,
