@@ -12,6 +12,34 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+- Segmentation API parity with native `mitk.MultiLabelSegmentation`:
+  `has_label`, `get_group_of_label`, `num_groups`, `set_group_name`,
+  `erase_label`/`erase_labels`, `remove_labels`, `rename_label`, a
+  `(name, color)` overload for `add_label` (with a default `group=0`),
+  `add_group(image=, labels=)`, and the lookups `label_values`, `get_labels`,
+  `get_label_values_by_name`, `get_group_label_values`. `LabelGroup` now exposes
+  `index`, `labels`, and `image` as a live view over its segmentation.
+- `merge_labels(target, sources)` as a simplified, best-effort operation: it
+  reassigns source pixels to the target and removes the sources. It diverges
+  from native MITK (no lock handling or merge/overwrite styles; native retains
+  the sources) and emits the new `MitkApiDivergenceWarning` on use.
+- `MitkApiDivergenceWarning`, emitted when a remote method knowingly diverges in
+  behavior from native MITK.
+
+### Changed (breaking)
+- `MultiLabelSegmentation.get_label(value)` now raises `KeyError` when the value
+  is absent instead of returning `None`. Use `has_label(value)` for existence
+  checks.
+- `MultiLabelSegmentation.remove_label(value)` no longer accepts `clear_pixels`;
+  it always removes the label and zeroes its pixels. To clear pixels but keep
+  the label, use `erase_label(value)`.
+- `LabelGroup.name` is now read-only; rename a group via
+  `MultiLabelSegmentation.set_group_name(index, name)`.
+- Label-value lookups that miss now raise `KeyError` (previously `ValueError`
+  for `remove_label`); group-index misses raise `IndexError`. Both subclass
+  `LookupError`.
+
 ## [0.1.0]
 
 ### Added
