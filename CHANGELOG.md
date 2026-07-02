@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   for `remove_label`); group-index misses raise `IndexError`. Both subclass
   `LookupError`.
 
+### Changed
+- `Image(...)` raises a clearer `TypeError` for unconvertible inputs: it now
+  enumerates the accepted inputs (numpy ndarray, `SimpleITK.Image`, `mitk.Image`,
+  `mlarray.MLArray`, or a `register_converter()` type) and notes that native
+  non-image `mitk.*` types are not spatial images.
+
+### Fixed
+- Example notebook `02_image_data.ipynb`: the SimpleITK section now fetches the
+  remote image explicitly with `get_data(as_type=REMOTE)` before
+  `to_simpleitk()`, so it runs whether or not the `mitk` package is installed
+  (`get_data()` under `AUTO` returns a native `mitk.Image`, which has no
+  `to_simpleitk()`). The AUTO return-type footgun is now documented in the
+  interop guide.
+
 ## [0.1.0]
 
 ### Added
