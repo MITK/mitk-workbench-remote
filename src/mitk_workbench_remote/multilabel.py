@@ -25,7 +25,8 @@ This module provides:
   reserved. Supports group-level image access, label properties editing, and
   value remapping.
 - :class:`LabelGroup`: A named collection of labels within a
-  ``MultiLabelSegmentation``.
+  ``MultiLabelSegmentation``, exposed as a live view (its ``labels`` and
+  ``image`` reflect the segmentation's current state at access time).
 - :class:`Label`: A single label with value, name, color, opacity, visibility,
   and lock state.
 """
@@ -266,13 +267,23 @@ class LabelGroup:
 
     @property
     def index(self) -> int:
-        """0-based position of this group within the owning segmentation."""
+        """0-based position of this group within the owning segmentation.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation (e.g. a
+                bare ``LabelGroup(...)`` obtained other than via ``seg.groups`` or
+                ``seg.get_group(i)``).
+        """
         _, index = self._owner()
         return index
 
     @property
     def labels(self) -> list[Label]:
-        """Label objects in this group, current at access time."""
+        """Label objects in this group, current at access time.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation.
+        """
         seg, index = self._owner()
         return seg.get_group_labels(index)
 
@@ -283,6 +294,9 @@ class LabelGroup:
         Delegates to :meth:`MultiLabelSegmentation.get_group_image`, so accessing
         it lazily zero-allocates the image exactly as that method does, and edits
         via ``.image.array`` persist on the segmentation.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation.
         """
         seg, index = self._owner()
         return seg.get_group_image(index)
@@ -702,11 +716,13 @@ class MultiLabelSegmentation:
         """Set a group's display name.
 
         The group's :attr:`LabelGroup.name` is read-only; this is the supported
-        way to rename it, matching native ``set_group_name``.
+        way to rename it, mirroring native ``set_group_name``. Passing ``None`` to
+        clear the name is a remote-only allowance -- native ``mitk`` requires a
+        string and rejects ``None``.
 
         Args:
             index: Group index.
-            name: New group name (or ``None`` to clear it).
+            name: New group name, or ``None`` to clear it (remote-only).
 
         Raises:
             IndexError: If ``index`` is out of range.
@@ -1040,9 +1056,14 @@ class MultiLabelSegmentation:
             Index of the newly added group.
 
         Raises:
+            TypeError: If ``image`` cannot be resolved to an ndarray (not an
+                ndarray, :class:`~mitk_workbench_remote.image.Image`, or a type
+                with a registered converter).
             ValueError: On shape/geometry mismatch of ``image`` or a duplicate
-                label value. On failure the half-seeded group is rolled back, so
-                a raised ``add_group`` never leaves a dangling group behind.
+                label value.
+
+        On any failure the half-seeded group is rolled back, so a raised
+        ``add_group`` never leaves a dangling group behind.
         """
         group = LabelGroup(name=name)
         self._groups.append(group)
