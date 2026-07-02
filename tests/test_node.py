@@ -939,7 +939,7 @@ def test_get_data_multilabel_segmentation_direct_mode() -> None:
     result = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(result, MultiLabelSegmentation)
     assert len(result.groups) == 1
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1264,7 +1264,7 @@ def test_get_data_multilabel_remote_returns_mw_mls() -> None:
     )
     result = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(result, MultiLabelSegmentation)
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 @responses.activate
@@ -1292,7 +1292,7 @@ def test_get_data_multilabel_auto_without_mitk_returns_mw_mls() -> None:
         result = node.get_data(as_type=DataRepresentation.AUTO)
 
     assert isinstance(result, MultiLabelSegmentation)
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 @responses.activate
