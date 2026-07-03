@@ -34,7 +34,7 @@ class Image:
     """Spatial image wrapper backed by a numpy array with spacing, origin, and direction.
 
     Accepts any type handled by the converter registry (ndarray, SimpleITK.Image,
-    mlarray.MLArray, file path). Pixel data conversion is lazy -- the array is
+    mitk.Image, mlarray.MLArray, ...). Pixel data conversion is lazy -- the array is
     only materialized on first access to :attr:`array`.
 
     Args:
@@ -71,8 +71,12 @@ class Image:
             converter = find_image_converter(data)
             if converter is None:
                 raise TypeError(
-                    f"No converter found for {type(data).__name__}. "
-                    f"Pass a numpy array or register a converter."
+                    f"No converter found for {type(data).__name__}. Image accepts a "
+                    f"numpy ndarray, or an object with a registered converter "
+                    f"(SimpleITK.Image, mitk.Image, mlarray.MLArray), or a custom type "
+                    f"registered via register_converter(). Native non-image mitk types "
+                    f"(e.g. mitk.PointSet, mitk.Surface) are not spatial images and have "
+                    f"no Image converter."
                 )
             self._array = None
             self._source_data = data
