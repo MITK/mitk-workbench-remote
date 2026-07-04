@@ -38,7 +38,10 @@ from mitk_workbench_remote import errors
 from mitk_workbench_remote._win import _find_listening_pids
 from mitk_workbench_remote.discovery import (
     _EXECUTABLE_ENV_VAR,
+    _NEW_INSTANCE_FLAG,
+    _PREFERENCE_OVERRIDE_FLAG,
     _PREFERENCE_PATCH_FLAG,
+    _TOKEN_ENV_VAR,
     _find_free_port,
     discover,
     launch,
@@ -48,6 +51,19 @@ from mitk_workbench_remote.workbench import Workbench
 
 def _api(port: int, path: str) -> str:
     return f"http://localhost:{port}/api/v1{path}"
+
+
+@pytest.fixture(autouse=True)
+def _no_running_workbench():
+    """Default all launch() tests to "no Workbench already running".
+
+    launch() now probes for a running single-instance Workbench up front. Left
+    unpatched it would run a real ``tasklist`` and, on a dev machine with a
+    Workbench open, turn every launch test into a single-instance error. Pin it
+    to False here; the single-instance/new_instance tests override it locally.
+    """
+    with patch("mitk_workbench_remote.discovery._workbench_process_running", return_value=False):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -184,18 +200,25 @@ def _restapi_props(xml_str: str) -> dict[str, str]:
     return {e.get("name"): e.get("value") for e in restapi.findall("property")}
 
 
-def test_build_prefs_xml_contains_port_and_token() -> None:
+def test_build_prefs_xml_contains_port() -> None:
     from mitk_workbench_remote.discovery import _build_prefs_xml
 
-    props = _restapi_props(_build_prefs_xml(8085, "mytoken"))
+    props = _restapi_props(_build_prefs_xml(8085))
     assert props["port"] == "8085"
-    assert props["apiToken"] == "mytoken"
+
+
+def test_build_prefs_xml_omits_token() -> None:
+    """The token must not be written to the prefs file; it travels via env."""
+    from mitk_workbench_remote.discovery import _build_prefs_xml
+
+    props = _restapi_props(_build_prefs_xml(8085))
+    assert "apiToken" not in props
 
 
 def test_build_prefs_xml_sets_auth_and_autostart() -> None:
     from mitk_workbench_remote.discovery import _build_prefs_xml
 
-    props = _restapi_props(_build_prefs_xml(8080, "tok"))
+    props = _restapi_props(_build_prefs_xml(8080))
     assert props["requireAuth"] == "true"
     assert props["enabled"] == "true"
     assert props["autoStart"] == "true"
@@ -204,7 +227,7 @@ def test_build_prefs_xml_sets_auth_and_autostart() -> None:
 def test_build_prefs_xml_is_valid_xml() -> None:
     from mitk_workbench_remote.discovery import _build_prefs_xml
 
-    ET.fromstring(_build_prefs_xml(8080, "tok"))  # must not raise
+    ET.fromstring(_build_prefs_xml(8080))  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -241,14 +264,14 @@ def test_launch_spawns_process_with_correct_args(tmp_path: Path) -> None:
 
     call_args = mock_popen.call_args[0][0]
     assert call_args[0] == str(exe)
-    assert _PREFERENCE_PATCH_FLAG in call_args
-    flag_idx = call_args.index(_PREFERENCE_PATCH_FLAG)
+    assert _PREFERENCE_OVERRIDE_FLAG in call_args
+    flag_idx = call_args.index(_PREFERENCE_OVERRIDE_FLAG)
     assert call_args[flag_idx + 1].startswith("@")
     wb.close()
 
 
 @responses.activate
-def test_launch_prefs_xml_built_with_correct_port_and_token(tmp_path: Path) -> None:
+def test_launch_prefs_xml_built_with_correct_port(tmp_path: Path) -> None:
     exe = _make_fake_exe(tmp_path)
     port = 8098
 
@@ -270,12 +293,13 @@ def test_launch_prefs_xml_built_with_correct_port_and_token(tmp_path: Path) -> N
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="tok123", timeout=5.0)
 
-    mock_build.assert_called_once_with(port, "tok123")
+    # Token is no longer part of the prefs file — only the port.
+    mock_build.assert_called_once_with(port)
     wb.close()
 
 
 @responses.activate
-def test_launch_auto_generates_token(tmp_path: Path) -> None:
+def test_launch_auto_generates_token_and_passes_via_env(tmp_path: Path) -> None:
     exe = _make_fake_exe(tmp_path)
     port = 8097
 
@@ -288,22 +312,20 @@ def test_launch_auto_generates_token(tmp_path: Path) -> None:
 
     with (
         patch("subprocess.Popen") as mock_popen,
-        patch(
-            "mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"
-        ) as mock_build,
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, timeout=5.0)
 
-    token = mock_build.call_args.args[1]
+    token = mock_popen.call_args.kwargs["env"][_TOKEN_ENV_VAR]
     assert re.fullmatch(r"[0-9a-f]{32}", token), f"Expected 32-hex token, got: {token!r}"
     wb.close()
 
 
 @responses.activate
-def test_launch_uses_explicit_token(tmp_path: Path) -> None:
+def test_launch_uses_explicit_token_via_env(tmp_path: Path) -> None:
     exe = _make_fake_exe(tmp_path)
     port = 8096
 
@@ -316,16 +338,14 @@ def test_launch_uses_explicit_token(tmp_path: Path) -> None:
 
     with (
         patch("subprocess.Popen") as mock_popen,
-        patch(
-            "mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"
-        ) as mock_build,
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
     ):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
         wb = launch(exe, port=port, token="explicit-token", timeout=5.0)
 
-    mock_build.assert_called_once_with(port, "explicit-token")
+    assert mock_popen.call_args.kwargs["env"][_TOKEN_ENV_VAR] == "explicit-token"
     wb.close()
 
 
@@ -727,6 +747,105 @@ def test_launch_unexpected_process_exit_raises_mitk_error(tmp_path: Path) -> Non
         pytest.raises(errors.MitkError, match="unexpectedly"),
     ):
         launch(exe, port=8086, token="tok", timeout=5.0)
+
+
+# ---------------------------------------------------------------------------
+# launch() — single-instance detection and new_instance
+# ---------------------------------------------------------------------------
+
+
+def test_launch_raises_when_workbench_already_running(tmp_path: Path) -> None:
+    """A running single-instance Workbench makes launch() fail fast with guidance,
+    before spawning anything."""
+    exe = _make_fake_exe(tmp_path)
+    with (
+        patch("mitk_workbench_remote.discovery._workbench_process_running", return_value=True),
+        patch("subprocess.Popen") as mock_popen,
+        pytest.raises(errors.MitkError, match="already running"),
+    ):
+        launch(exe, port=8099, token="tok", timeout=5.0)
+
+    mock_popen.assert_not_called()
+
+
+@responses.activate
+def test_launch_new_instance_forces_patch_and_newinstance_flags(tmp_path: Path) -> None:
+    """new_instance=True with a Workbench running uses the node-creating patch and
+    forces a separate instance via --BlueBerry.newInstance."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8099
+    responses.add(
+        responses.GET, _api(port, "/health"), json={"data": {"status": "healthy"}}, status=200
+    )
+    with (
+        patch("mitk_workbench_remote.discovery._workbench_process_running", return_value=True),
+        patch("subprocess.Popen") as mock_popen,
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+    ):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+        wb = launch(exe, port=port, token="tok", timeout=5.0, new_instance=True)
+
+    cmd = mock_popen.call_args[0][0]
+    assert _PREFERENCE_PATCH_FLAG in cmd
+    assert _NEW_INSTANCE_FLAG in cmd
+    assert _PREFERENCE_OVERRIDE_FLAG not in cmd
+    wb.close()
+
+
+@responses.activate
+def test_launch_not_running_uses_override_without_newinstance(tmp_path: Path) -> None:
+    """With nothing running, even new_instance=True keeps the override path: the
+    newInstance flag would be a no-op that persists REST config into the real prefs."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8099
+    responses.add(
+        responses.GET, _api(port, "/health"), json={"data": {"status": "healthy"}}, status=200
+    )
+    with (
+        patch("mitk_workbench_remote.discovery._workbench_process_running", return_value=False),
+        patch("subprocess.Popen") as mock_popen,
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+    ):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+        wb = launch(exe, port=port, token="tok", timeout=5.0, new_instance=True)
+
+    cmd = mock_popen.call_args[0][0]
+    assert _PREFERENCE_OVERRIDE_FLAG in cmd
+    assert _NEW_INSTANCE_FLAG not in cmd
+    assert _PREFERENCE_PATCH_FLAG not in cmd
+    wb.close()
+
+
+@responses.activate
+def test_launch_timeout_reports_single_instance_when_detected_late(tmp_path: Path) -> None:
+    """A handoff missed at pre-flight (a race, or no detection) is surfaced at the
+    deadline as a single-instance error, not the generic 'did not start' message."""
+    exe = _make_fake_exe(tmp_path)
+    port = 8090
+
+    def _refuse(request):
+        raise requests.exceptions.ConnectionError("refused")
+
+    responses.add_callback(responses.GET, _api(port, "/health"), callback=_refuse)
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = 0  # wrapper exited 0, port never opens
+    with (
+        # False at pre-flight (so we do launch), True at the timeout re-check.
+        patch(
+            "mitk_workbench_remote.discovery._workbench_process_running",
+            side_effect=[False, True],
+        ),
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("mitk_workbench_remote.discovery._build_prefs_xml", return_value="<xml/>"),
+        patch("mitk_workbench_remote.discovery._kill_port_listeners"),
+        pytest.raises(errors.MitkError, match="single-instance"),
+    ):
+        launch(exe, port=port, token="tok", timeout=0)
 
 
 # ---------------------------------------------------------------------------
