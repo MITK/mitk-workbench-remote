@@ -36,18 +36,41 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from mitk_workbench_remote import errors
-from mitk_workbench_remote._win import _kill_port_listeners
+from mitk_workbench_remote._win import _kill_port_listeners, _workbench_process_running
 from mitk_workbench_remote.transport import RestTransport
 from mitk_workbench_remote.workbench import Workbench
 
 _log = logging.getLogger(__name__)
 
-_PREFERENCE_PATCH_FLAG: str = "--MITK.preferences-override"
+# Session-only preference overlay: shadows the running config without touching the
+# on-disk prefs store, but the referenced node must already exist. Used for the
+# ordinary launch into the Workbench's normal storage.
+_PREFERENCE_OVERRIDE_FLAG: str = "--MITK.preferences-override"
+# Persisting preference patch: creates the node if missing and flushes it to disk.
+# Required for a forced new instance, whose fresh temporary storage has no REST
+# node for an override to target.
+_PREFERENCE_PATCH_FLAG: str = "--MITK.preferences-patch"
+# Forces a genuinely separate instance instead of the single-instance handoff.
+# Only effective when another instance is already running; otherwise it is a no-op
+# and the normal storage directory is used.
+_NEW_INSTANCE_FLAG: str = "--BlueBerry.newInstance"
 _EXECUTABLE_ENV_VAR: str = "MITK_WORKBENCH"
+# The REST server reads the API token from this environment variable in preference
+# to the stored preference value (MITK's documented, more secure mechanism). Passing
+# the token this way keeps it out of the preferences file entirely — off both the
+# transient override/patch @file and any prefs.xml a patch would flush to disk.
+_TOKEN_ENV_VAR: str = "MITK_REST_API_TOKEN"
 
 
-def _build_prefs_xml(port: int, token: str) -> str:
-    """Build the MITK XML preferences string to enable the REST API."""
+def _build_prefs_xml(port: int) -> str:
+    """Build the MITK XML preferences string to enable the REST API.
+
+    The API token is intentionally NOT included here — it is supplied to the
+    process through the ``MITK_REST_API_TOKEN`` environment variable, which the
+    server prefers over the stored preference. This keeps the secret off disk
+    (the ``@file`` this XML is written to, and any ``prefs.xml`` a patch would
+    flush), while ``requireAuth=true`` still enforces authentication.
+    """
     root = ET.Element("preferences")
     root.set("name", "")
     restapi = ET.SubElement(root, "preferences")
@@ -57,7 +80,6 @@ def _build_prefs_xml(port: int, token: str) -> str:
         ("autoStart", "true"),
         ("port", str(port)),
         ("requireAuth", "true"),
-        ("apiToken", token),
     ]:
         elem = ET.SubElement(restapi, "property")
         elem.set("name", prop_name)
@@ -165,12 +187,45 @@ def launch(
     token: str | None = None,
     timeout: float = 30.0,
     extra_args: list[str] | None = None,
+    new_instance: bool = False,
 ) -> Workbench:
     """Start a new MITK Workbench process with the REST API enabled.
 
     Spawns the process, waits for the REST server to become healthy, and
     returns a connected :class:`~mitk_workbench_remote.workbench.Workbench`
     handle.
+
+    **Single-instance behavior.** MITK Workbench is single-instance: starting
+    it while an instance is already running makes the new process hand off to
+    the running one and exit without bringing up a REST server on the requested
+    port. ``launch()`` detects a running instance up front (Windows) and, by
+    default, raises :class:`~mitk_workbench_remote.errors.MitkError` with
+    guidance to :func:`connect`/:func:`discover` instead. Pass
+    ``new_instance=True`` to force a genuinely separate, isolated instance
+    (see below).
+
+    **Authentication token.** The token is passed to the process through the
+    ``MITK_REST_API_TOKEN`` environment variable, which the server prefers over
+    the stored preference. The token is therefore never written to disk — not to
+    the preferences file this call generates, nor to any ``prefs.xml`` the server
+    persists — while ``requireAuth=true`` still enforces it.
+
+    **``new_instance=True``.** When another Workbench is already running, this
+    forces a separate instance via ``--BlueBerry.newInstance``. That instance
+    runs from a fresh MITK-managed temporary storage directory (its REST
+    preferences are seeded with ``--MITK.preferences-patch``; no token is written
+    there). Note that MITK does not remove this temporary directory afterward, so
+    forced instances leave behind (secret-free) temp directories. When no instance
+    is running, ``new_instance`` has no effect — the normal launch already yields a
+    fresh instance without a throwaway storage directory. This flag is only acted
+    on where a running instance can be detected (Windows).
+
+    The forced instance only gets its own throwaway storage if MITK actually
+    starts a separate instance — i.e. the already-running Workbench is the
+    single-instance owner. In the unusual case where a Workbench process exists
+    but is not that owner (e.g. it is itself a forced instance), MITK does not
+    fork and the seeded REST preferences (``enabled``/``autoStart``/``port``,
+    never the token) are written to the normal preferences store instead.
 
     On Windows the shipped launcher is a ``.bat`` wrapper that ``start /B``
     detaches the real ``MitkWorkbench.exe``; the tracked ``cmd.exe`` then
@@ -198,7 +253,9 @@ def launch(
         timeout: Maximum seconds to wait for the server to become healthy
             before giving up.
         extra_args: Additional command-line arguments appended after the
-            preference patch XML file reference.
+            preference file reference.
+        new_instance: Force a separate, isolated instance when a Workbench is
+            already running, instead of raising. See the note above.
 
     Returns:
         A :class:`~mitk_workbench_remote.workbench.Workbench` handle backed
@@ -206,8 +263,9 @@ def launch(
 
     Raises:
         MitkError: If ``executable`` is ``None`` and ``MITK_WORKBENCH`` is
-            not set, if no free port is available, or if the Workbench process
-            exits immediately with a preference-patch failure.
+            not set, if no free port is available, if a Workbench is already
+            running and ``new_instance`` is ``False``, or if the Workbench
+            process exits immediately with a preference failure.
         FileNotFoundError: If the resolved executable path does not exist.
         MitkConnectionError: If the server does not become healthy within
             ``timeout`` seconds.
@@ -229,7 +287,30 @@ def launch(
             raise FileNotFoundError(f"MITK Workbench executable not found: {resolved_exe}")
         resolved_exe = Path(which_result)
 
-    # 2. Build MITK workbench call & Execute
+    # 2. Detect the single-instance handoff up front. If a Workbench is already
+    # running, starting the executable again just forwards the arguments to it and
+    # the new process exits without ever binding a REST server on our port. Rather
+    # than wait out the whole timeout on a handoff that cannot succeed, fail fast
+    # with guidance -- unless the caller opted into a forced separate instance. The
+    # GUI process is <stem>.exe whether the launcher is that exe or a .bat wrapper.
+    workbench_image = resolved_exe.stem + ".exe"
+    workbench_running = _workbench_process_running(workbench_image)
+    if workbench_running and not new_instance:
+        raise errors.MitkError(
+            f"A MITK Workbench ({workbench_image}) is already running. MITK "
+            "Workbench is single-instance: a new launch hands off to the running "
+            "instance and exits without starting a REST server on the requested "
+            "port. Connect to the running instance with mw.discover() or "
+            "mw.connect(), close it and retry, or pass new_instance=True to force "
+            "a separate, isolated instance."
+        )
+    # --BlueBerry.newInstance only forces a separate (temporary-storage) instance
+    # when another instance is already running; with nothing running it is a no-op
+    # and would fall back to the real storage directory, so we keep the ordinary
+    # override path there to avoid persisting REST config into the user's prefs.
+    force_new_instance = workbench_running and new_instance
+
+    # 3. Build MITK workbench call & Execute
     if port is None:
         port = _find_free_port()
 
@@ -258,11 +339,19 @@ def launch(
 
     try:
         with os.fdopen(fd, "w", encoding="UTF-8") as f:
-            f.write(_build_prefs_xml(port, token))
+            f.write(_build_prefs_xml(port))
 
-        # We use the file option and not the direct xml content passing for security
-        # reasons to avoid that the API key can be queried via the process informations
-        cmd: list[str] = [str(resolved_exe), _PREFERENCE_PATCH_FLAG, f"@{prefs_path}"]
+        # A forced new instance runs from fresh temporary storage with no REST
+        # node, so the session-only override (which requires the node to exist)
+        # cannot target it; use the node-creating patch there. The ordinary launch
+        # uses the override so nothing is persisted into the real prefs store. The
+        # XML is passed via @file rather than inline so it is not visible in the
+        # process command line (it carries no token, but the file is still the
+        # documented mechanism).
+        prefs_flag = _PREFERENCE_PATCH_FLAG if force_new_instance else _PREFERENCE_OVERRIDE_FLAG
+        cmd: list[str] = [str(resolved_exe), prefs_flag, f"@{prefs_path}"]
+        if force_new_instance:
+            cmd.append(_NEW_INSTANCE_FLAG)
         if extra_args:
             cmd.extend(extra_args)
 
@@ -273,7 +362,11 @@ def launch(
         stderr_fd, stderr_path = tempfile.mkstemp(suffix=".log", prefix="mitk_stderr_")
         stderr_file = os.fdopen(stderr_fd, "wb")
         try:
-            process = subprocess.Popen(cmd, stderr=stderr_file)
+            # The token travels in the child environment (server-preferred over the
+            # stored pref), keeping it off disk entirely. It is inherited only by
+            # this process tree, not visible in the command line.
+            child_env = {**os.environ, _TOKEN_ENV_VAR: token}
+            process = subprocess.Popen(cmd, stderr=stderr_file, env=child_env)
         finally:
             # Popen inherited its own copy; close the parent's so we don't leak a
             # descriptor. The child keeps writing through its inherited handle.
@@ -323,6 +416,19 @@ def launch(
                 f"code {exited}). If this is a fresh installation, please start the Workbench "
                 "manually once to initialise its preferences store, then try again."
             )
+        # A handoff we could not detect up front (a race, or a platform where
+        # process detection is unavailable) also lands here: the wrapper exits 0
+        # and the port never opens. If a Workbench is running now, name the real
+        # cause instead of the generic "did not start" message.
+        if not force_new_instance and _workbench_process_running(workbench_image):
+            raise errors.MitkError(
+                f"Workbench did not become reachable on port {port} within {timeout}s "
+                f"because a MITK Workbench ({workbench_image}) is already running: MITK "
+                "Workbench is single-instance, so this launch handed off to it and no "
+                "REST server came up on the requested port. Connect to the running "
+                "instance with mw.discover() or mw.connect(), close it and retry, or "
+                "pass new_instance=True to force a separate, isolated instance."
+            ) from last_exc
         detail = (
             f"the launched process already exited (code {exited}) and "
             if exited is not None
