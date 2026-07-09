@@ -21,6 +21,7 @@
 import numpy as np
 import pytest
 
+from mitk_workbench_remote.errors import MitkApiDivergenceWarning
 from mitk_workbench_remote.image import Image
 from mitk_workbench_remote.multilabel import LABEL_DTYPE, Label, LabelGroup, MultiLabelSegmentation
 
@@ -163,10 +164,11 @@ def test_labelgroup_label_ids_is_copy() -> None:
     assert g._label_ids == [1]  # internal state unchanged
 
 
-def test_labelgroup_name_setter() -> None:
+def test_labelgroup_name_is_read_only() -> None:
+    # name mirrors native's read-only snapshot; rename via seg.set_group_name.
     g = LabelGroup("A")
-    g.name = "B"
-    assert g.name == "B"
+    with pytest.raises(AttributeError):
+        g.name = "B"  # type: ignore[misc]
 
 
 def test_labelgroup_repr() -> None:
@@ -175,6 +177,86 @@ def test_labelgroup_repr() -> None:
     r = repr(g)
     assert "Organs" in r
     assert "1" in r
+
+
+# ===========================================================================
+# LabelGroup live view (index / labels / image) + group naming
+# ===========================================================================
+
+
+def test_labelgroup_view_index_and_labels() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G0")
+    seg.add_group("G1")
+    seg.add_label(Label(1, "A"), group=1)
+    seg.add_label(Label(2, "B"), group=1)
+
+    assert seg.groups[0].index == 0
+    assert seg.groups[1].index == 1
+    labels = seg.groups[1].labels
+    assert {lbl.name for lbl in labels} == {"A", "B"}
+
+
+def test_labelgroup_view_image_is_live() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    # group.image is the same cached Image object as get_group_image(index)
+    assert seg.groups[0].image is seg.get_group_image(0)
+    seg.groups[0].image.array[2, 2, 2] = 7
+    assert seg.get_group_image(0).array[2, 2, 2] == 7
+
+
+def test_listing_groups_does_not_allocate_images() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G0")
+    seg.add_group("G1")
+    # Merely iterating groups must not touch .image, so empty groups stay unallocated.
+    _ = [g.name for g in seg.groups]
+    assert seg._group_images[0] is None
+    assert seg._group_images[1] is None
+
+
+def test_num_groups() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    assert seg.num_groups == 0
+    seg.add_group("G0")
+    seg.add_group("G1")
+    assert seg.num_groups == 2
+
+
+def test_set_group_name() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("Old")
+    seg.set_group_name(0, "New")
+    assert seg.get_group(0).name == "New"
+    assert seg.groups[0].name == "New"
+
+
+def test_set_group_name_oob_raises() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    with pytest.raises(IndexError):
+        seg.set_group_name(0, "X")
+
+
+def test_labelgroup_view_accessors_after_io_roundtrip() -> None:
+    # The __init__ back-ref must also cover segs built by the constructor via
+    # _io (read_multilabel_nrrd calls the constructor directly, not create()).
+    from mitk_workbench_remote._io.multilabel_nrrd import (
+        read_multilabel_nrrd,
+        write_multilabel_nrrd,
+    )
+
+    seg = MultiLabelSegmentation.create(shape=(4, 5, 6))
+    g = seg.add_group("Organs")
+    seg.add_label(Label(1, "Liver"), group=g)
+    arr = np.zeros((4, 5, 6), dtype=LABEL_DTYPE)
+    arr[1, 1, 1] = 1
+    seg.set_group_image(g, arr)
+
+    seg2 = read_multilabel_nrrd(write_multilabel_nrrd(seg))
+    assert seg2.groups[0].index == 0
+    assert [lbl.name for lbl in seg2.groups[0].labels] == ["Liver"]
+    assert seg2.groups[0].image.array[1, 1, 1] == 1
 
 
 # ===========================================================================
@@ -293,7 +375,7 @@ def test_add_label_group_oob_raises() -> None:
 # ===========================================================================
 
 
-def test_remove_label_clear_pixels() -> None:
+def test_remove_label_zeroes_pixels() -> None:
     seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
     g = seg.add_group("G")
     seg.add_label(Label(1, "Liver"), group=g)
@@ -301,29 +383,333 @@ def test_remove_label_clear_pixels() -> None:
     arr[2, 2, 2] = 1
     seg.set_group_image(g, arr)
 
-    seg.remove_label(1, clear_pixels=True)
-    assert seg.get_label(1) is None
+    seg.remove_label(1)
+    assert not seg.has_label(1)
     assert seg._group_images[g].array[2, 2, 2] == 0
 
 
-def test_remove_label_no_clear_pixels() -> None:
+def test_remove_label_rejects_clear_pixels_kwarg() -> None:
     seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
     g = seg.add_group("G")
     seg.add_label(Label(1, "Liver"), group=g)
-    arr = np.zeros((5, 5, 5), dtype=np.uint8)
-    arr[2, 2, 2] = 1
-    seg.set_group_image(g, arr)
-
-    seg.remove_label(1, clear_pixels=False)
-    assert seg.get_label(1) is None
-    # pixel not cleared
-    assert seg._group_images[g].array[2, 2, 2] == 1
+    with pytest.raises(TypeError):
+        seg.remove_label(1, clear_pixels=True)  # type: ignore[call-arg]
 
 
 def test_remove_label_unknown_raises() -> None:
     seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(KeyError):
         seg.remove_label(99)
+
+
+# ===========================================================================
+# Label lifecycle parity: add_label overload, remove_labels, erase_*, rename
+# ===========================================================================
+
+
+def test_add_label_name_color_overload() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    lbl = seg.add_label("Liver", (0.8, 0.2, 0.1))
+    assert lbl.name == "Liver"
+    assert lbl.color == (0.8, 0.2, 0.1)
+    assert lbl.value == 1
+
+
+def test_add_label_default_group_zero() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    lbl = seg.add_label(Label(1, "X"))  # no group -> defaults to 0
+    assert seg.get_group_of_label(lbl.value) == 0  # type: ignore[arg-type]
+
+
+def test_add_label_name_color_into_specific_group() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G0")
+    seg.add_group("G1")
+    lbl = seg.add_label("Tumor", (1.0, 0.0, 0.0), 1)
+    assert seg.get_group_of_label(lbl.value) == 1  # type: ignore[arg-type]
+
+
+def test_add_label_wrong_first_arg_type_raises_typeerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    with pytest.raises(TypeError):
+        seg.add_label(123, group=0)  # type: ignore[call-overload]
+
+
+def test_add_label_str_without_color_raises_typeerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    with pytest.raises(TypeError):
+        seg.add_label("Liver")  # type: ignore[call-overload]
+
+
+def test_add_label_name_color_out_of_range_raises_valueerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    with pytest.raises(ValueError, match=r"\[0\.0, 1\.0\]"):
+        seg.add_label("Bad", (1.5, 0.0, 0.0))
+
+
+def test_remove_labels_removes_all_and_pixels() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    seg.add_label(Label(2, "B"), group=g)
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    arr[1, 1, 1] = 2
+    seg.set_group_image(g, arr)
+
+    seg.remove_labels([1, 2])
+    assert not seg.has_label(1)
+    assert not seg.has_label(2)
+    stored = seg.get_group_image(g).array
+    assert stored[0, 0, 0] == 0
+    assert stored[1, 1, 1] == 0
+    # remove_labels zeroes pixels and drops the labels, so no consistency warning.
+    assert seg.validate() == []
+
+
+def test_remove_labels_is_atomic_on_missing_value() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    seg.set_group_image(g, arr)
+
+    with pytest.raises(KeyError):
+        seg.remove_labels([1, 99])  # 99 missing -> nothing removed
+    assert seg.label_values == [1]
+    assert seg.get_group_image(g).array[0, 0, 0] == 1
+
+
+def test_remove_labels_deduplicates() -> None:
+    # A repeated value must not crash mid-op (second pass would miss after the
+    # first removed it); dedup after validation prevents the half-applied state.
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    seg.remove_labels([1, 1])
+    assert not seg.has_label(1)
+
+
+def test_erase_label_keeps_label_zeroes_pixels() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    seg.set_group_image(g, arr)
+
+    seg.erase_label(1)
+    assert seg.has_label(1)  # label kept
+    assert seg.get_group_image(g).array[0, 0, 0] == 0  # pixels cleared
+    # The now-unpainted label is exactly what validate() is expected to report.
+    warnings = seg.validate()
+    assert any("1" in w and "not present" in w for w in warnings)
+
+
+def test_erase_label_missing_raises_keyerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    with pytest.raises(KeyError):
+        seg.erase_label(99)
+
+
+def test_erase_label_unallocated_image_is_noop() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    seg.erase_label(1)  # image never allocated -> must not raise or allocate
+    assert seg._group_images[g] is None
+
+
+def test_erase_labels_idempotent_on_duplicate() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    seg.set_group_image(g, arr)
+    seg.erase_labels([1, 1])
+    assert seg.has_label(1)
+    assert seg.get_group_image(g).array[0, 0, 0] == 0
+
+
+def test_rename_label() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "Old", color=(0.1, 0.1, 0.1)), group=g)
+    seg.rename_label(1, "New", (0.5, 0.6, 0.7))
+    lbl = seg.get_label(1)
+    assert lbl.name == "New"
+    assert lbl.color == (0.5, 0.6, 0.7)
+
+
+def test_rename_label_missing_raises_keyerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    with pytest.raises(KeyError):
+        seg.rename_label(99, "X", (0.0, 0.0, 0.0))
+
+
+def test_rename_label_bad_color_is_atomic() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "Old", color=(0.1, 0.1, 0.1)), group=g)
+    with pytest.raises(ValueError):
+        seg.rename_label(1, "New", (1.5, 0.0, 0.0))
+    lbl = seg.get_label(1)
+    assert lbl.name == "Old"  # name left untouched when color validation fails
+    assert lbl.color == (0.1, 0.1, 0.1)
+
+
+def test_add_group_with_image_and_labels() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    idx = seg.add_group("Seeded", image=arr, labels=[Label(1, "A")])
+    assert seg.num_groups == 1
+    assert [lbl.name for lbl in seg.get_group_labels(idx)] == ["A"]
+    assert seg.get_group_image(idx).array[0, 0, 0] == 1
+
+
+def test_add_group_positional_image_and_labels() -> None:
+    # Native add_group(name, image, labels) takes image/labels positionally;
+    # remote must match so identical code works in both modes.
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    idx = seg.add_group("Seeded", arr, [Label(1, "A")])
+    assert seg.get_group_label_values(idx) == [1]
+    assert seg.get_group_image(idx).array[0, 0, 0] == 1
+
+
+def test_add_group_image_shape_mismatch_rolls_back() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    bad = np.zeros((5, 5, 5), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        seg.add_group("Bad", image=bad)
+    assert seg.num_groups == 0  # dangling group rolled back
+
+
+def test_add_group_duplicate_label_rolls_back() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g0 = seg.add_group("G0")
+    seg.add_label(Label(1, "A"), group=g0)
+    with pytest.raises(ValueError, match="already exists"):
+        seg.add_group("G1", labels=[Label(1, "dup")])
+    assert seg.num_groups == 1  # the failed group is not left behind
+    assert seg.label_values == [1]  # no stray label from the rolled-back group
+
+
+# ===========================================================================
+# merge_labels (simplified; emits MitkApiDivergenceWarning)
+# ===========================================================================
+
+
+def _seg_two_labels_one_group() -> tuple[MultiLabelSegmentation, int]:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    seg.add_label(Label(2, "B"), group=g)
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    arr[1, 1, 1] = 2
+    seg.set_group_image(g, arr)
+    return seg, g
+
+
+def test_merge_labels_same_group_reassigns_and_removes_sources() -> None:
+    seg, g = _seg_two_labels_one_group()
+    with pytest.warns(MitkApiDivergenceWarning):
+        seg.merge_labels(1, [2])
+    assert seg.has_label(1)
+    assert not seg.has_label(2)  # source removed
+    arr = seg.get_group_image(g).array
+    assert arr[0, 0, 0] == 1
+    assert arr[1, 1, 1] == 1  # former source pixel is now the target value
+    assert seg.validate() == []  # same-group merge preserves consistency
+
+
+def test_merge_labels_cross_group() -> None:
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(1, "target"), group=g0)
+    seg.add_label(Label(2, "source"), group=g1)
+    a0 = np.zeros((4, 4, 4), dtype=np.uint8)
+    a0[0, 0, 0] = 1
+    seg.set_group_image(g0, a0)
+    a1 = np.zeros((4, 4, 4), dtype=np.uint8)
+    a1[3, 3, 3] = 2
+    seg.set_group_image(g1, a1)
+
+    with pytest.warns(MitkApiDivergenceWarning):
+        seg.merge_labels(1, [2])
+    assert not seg.has_label(2)
+    target_arr = seg.get_group_image(g0).array
+    assert target_arr[3, 3, 3] == 1  # source location moved into the target group
+    assert seg.get_group_image(g1).array[3, 3, 3] == 0  # source pixels cleared
+
+
+def test_merge_labels_missing_target_raises_keyerror() -> None:
+    seg, _ = _seg_two_labels_one_group()
+    with pytest.raises(KeyError):
+        seg.merge_labels(99, [1])
+
+
+def test_merge_labels_missing_source_raises_keyerror() -> None:
+    seg, _ = _seg_two_labels_one_group()
+    with pytest.raises(KeyError):
+        seg.merge_labels(1, [99])
+
+
+def test_merge_labels_self_merge_keeps_target() -> None:
+    seg, _ = _seg_two_labels_one_group()
+    with pytest.warns(MitkApiDivergenceWarning):
+        seg.merge_labels(1, [1])  # target dropped from sources -> no-op removal
+    assert seg.has_label(1)
+
+
+def test_merge_labels_cross_group_overwrite_strands_label() -> None:
+    # Documented divergence: merging into the target group can overwrite another
+    # target-group label's last pixels, leaving it declared-but-absent.
+    seg = MultiLabelSegmentation.create(shape=(4, 4, 4))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(1, "target"), group=g0)
+    seg.add_label(Label(3, "victim"), group=g0)
+    seg.add_label(Label(2, "source"), group=g1)
+    a0 = np.zeros((4, 4, 4), dtype=np.uint8)
+    a0[2, 2, 2] = 3  # victim's only pixel
+    seg.set_group_image(g0, a0)
+    a1 = np.zeros((4, 4, 4), dtype=np.uint8)
+    a1[2, 2, 2] = 2  # source overlaps victim's pixel
+    seg.set_group_image(g1, a1)
+
+    with pytest.warns(MitkApiDivergenceWarning):
+        seg.merge_labels(1, [2])
+    # Victim label is still declared but its last pixel was overwritten by target.
+    assert seg.has_label(3)
+    warnings_list = seg.validate()
+    assert any("3" in w and "not present" in w for w in warnings_list)
+
+
+def test_divergence_warning_is_public_and_escalatable() -> None:
+    import warnings
+
+    import mitk_workbench_remote as mw
+
+    assert "MitkApiDivergenceWarning" in mw.__all__
+    assert mw.MitkApiDivergenceWarning is MitkApiDivergenceWarning
+
+    seg, _ = _seg_two_labels_one_group()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MitkApiDivergenceWarning)
+        with pytest.raises(MitkApiDivergenceWarning):
+            seg.merge_labels(1, [2])
 
 
 # ===========================================================================
@@ -336,13 +722,63 @@ def test_get_label_found() -> None:
     g = seg.add_group("G")
     seg.add_label(Label(2, "Spleen"), group=g)
     lbl = seg.get_label(2)
-    assert lbl is not None
     assert lbl.name == "Spleen"
 
 
-def test_get_label_not_found() -> None:
+def test_get_label_missing_raises_keyerror() -> None:
     seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
-    assert seg.get_label(99) is None
+    with pytest.raises(KeyError):
+        seg.get_label(99)
+
+
+def test_has_label_present_and_absent() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g = seg.add_group("G")
+    seg.add_label(Label(2, "Spleen"), group=g)
+    assert seg.has_label(2) is True
+    assert seg.has_label(99) is False
+    assert seg.has_label(0) is False  # UNLABELED_VALUE is never a registered label
+
+
+def test_get_group_of_label() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(1, "A"), group=g0)
+    seg.add_label(Label(2, "B"), group=g1)
+    assert seg.get_group_of_label(1) == 0
+    assert seg.get_group_of_label(2) == 1
+
+
+def test_get_group_of_label_missing_raises_keyerror() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    with pytest.raises(KeyError):
+        seg.get_group_of_label(99)
+
+
+def test_lookup_errors_subclass_lookuperror() -> None:
+    # Group-index misses (IndexError) and label-value misses (KeyError) are both
+    # catchable via `except LookupError`, matching the Python container idiom.
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    with pytest.raises(LookupError):
+        seg.get_group(0)  # index miss -> IndexError
+    with pytest.raises(LookupError):
+        seg.get_label(1)  # value miss -> KeyError
+
+
+def test_unlabeled_value_zero_is_value_miss_not_arg_error() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    seg.add_group("G")
+    # 0 is never a registered label: value-lookups treat it as a miss (KeyError).
+    with pytest.raises(KeyError):
+        seg.get_label(0)
+    with pytest.raises(KeyError):
+        seg.remove_label(0)
+    with pytest.raises(KeyError):
+        seg.get_group_of_label(0)
+    # 0 as an explicit label value is a reserved-argument error (ValueError).
+    with pytest.raises(ValueError):
+        seg.add_label(Label(0, "bad"), group=0)
 
 
 def test_get_group_oob_raises() -> None:
@@ -373,6 +809,71 @@ def test_get_group_labels() -> None:
     assert len(labels) == 2
     names = {lbl.name for lbl in labels}
     assert names == {"A", "B"}
+
+
+# ===========================================================================
+# Lookup helpers: label_values, get_labels, get_label_values_by_name,
+# get_group_label_values
+# ===========================================================================
+
+
+def test_label_values_sorted_ascending() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(3, "C"), group=g1)
+    seg.add_label(Label(1, "A"), group=g0)
+    seg.add_label(Label(2, "B"), group=g0)
+    assert seg.label_values == [1, 2, 3]
+
+
+def test_get_labels_skips_missing_and_preserves_order() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g = seg.add_group("G")
+    seg.add_label(Label(1, "A"), group=g)
+    seg.add_label(Label(2, "B"), group=g)
+    result = seg.get_labels([2, 99, 1])
+    assert [lbl.value for lbl in result] == [2, 1]  # 99 skipped, order preserved
+
+
+def test_get_label_values_by_name_across_groups() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(1, "Liver"), group=g0)
+    seg.add_label(Label(2, "Liver"), group=g1)  # same name, different group
+    seg.add_label(Label(3, "Spleen"), group=g1)
+    assert seg.get_label_values_by_name("Liver") == [1, 2]
+    assert seg.get_label_values_by_name("Missing") == []
+
+
+def test_get_label_values_by_name_restricted_to_group() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g0 = seg.add_group("G0")
+    g1 = seg.add_group("G1")
+    seg.add_label(Label(1, "Liver"), group=g0)
+    seg.add_label(Label(2, "Liver"), group=g1)
+    assert seg.get_label_values_by_name("Liver", group=1) == [2]
+
+
+def test_get_label_values_by_name_group_oob_raises() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    with pytest.raises(IndexError):
+        seg.get_label_values_by_name("X", group=0)
+
+
+def test_get_group_label_values() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    g = seg.add_group("G")
+    seg.add_label(Label(5, "A"), group=g)
+    seg.add_label(Label(7, "B"), group=g)
+    assert seg.get_group_label_values(g) == [5, 7]
+
+
+def test_get_group_label_values_oob_raises() -> None:
+    seg = MultiLabelSegmentation.create(shape=(5, 5, 5))
+    with pytest.raises(IndexError):
+        seg.get_group_label_values(0)
 
 
 def test_labels_property_raises_on_label_with_none_value() -> None:

@@ -548,6 +548,12 @@ class DataNode:
           ``mitk.MultiLabelSegmentation``; raises :exc:`ImportError` if the
           ``mitk`` package is absent.
 
+        The remote-only conversion helpers (``to_simpleitk``, ``to_mlarray``,
+        ``to_mitk``, ``to_numpy``) exist only on the remote
+        :class:`~mitk_workbench_remote.image.Image`; a native ``mitk.Image``
+        returned by ``AUTO`` does not have them. Request ``as_type=REMOTE`` when
+        you need one (see the "Interop with the mitk package" guide).
+
         The transfer mode (direct or file-reference) is negotiated automatically
         based on the transport's :attr:`~RestTransport.transfer_mode`.
 

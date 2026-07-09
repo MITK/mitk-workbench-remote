@@ -99,6 +99,55 @@ def test_roundtrip_all_fields() -> None:
     assert tumor.color == pytest.approx((1.0, 0.0, 0.0))
 
 
+def _assert_seg_semantically_equal(a: MultiLabelSegmentation, b: MultiLabelSegmentation) -> None:
+    assert a.num_groups == b.num_groups
+    for i in range(a.num_groups):
+        assert a.groups[i].name == b.groups[i].name
+        assert a.get_group_label_values(i) == b.get_group_label_values(i)
+        np.testing.assert_array_equal(a.get_group_image(i).array, b.get_group_image(i).array)
+    assert a.label_values == b.label_values
+    for v in a.label_values:
+        la, lb = a.get_label(v), b.get_label(v)
+        assert la.name == lb.name
+        assert la.color == pytest.approx(lb.color)
+        assert la.visible == lb.visible
+        assert la.locked == lb.locked
+
+
+def test_roundtrip_after_mutation_sequence() -> None:
+    # A segmentation built and then mutated through the new API must survive a
+    # write -> read cycle with identical groups, label metadata, and pixels
+    # (semantic equality; byte-equality is neither guaranteed nor asserted).
+    seg = MultiLabelSegmentation.create(shape=(4, 5, 6), spacing=(1.0, 2.0, 3.0))
+    g0 = seg.add_group("Organs")
+    g1 = seg.add_group("Lesions")
+    seg.add_label("Liver", (0.8, 0.2, 0.1), g0)  # (name, color) overload
+    seg.add_label(Label(2, "Spleen", visible=False), group=g0)
+    seg.add_label(Label(3, "Kidney"), group=g0)
+    seg.add_label(Label(4, "Tumor", locked=True), group=g1)
+
+    arr0 = np.zeros((4, 5, 6), dtype=np.uint8)
+    arr0[0, 0, 0] = 1  # Liver
+    arr0[1, 1, 1] = 2  # Spleen
+    arr0[2, 2, 2] = 3  # Kidney
+    seg.set_group_image(g0, arr0)
+    arr1 = np.zeros((4, 5, 6), dtype=np.uint8)
+    arr1[3, 3, 3] = 4  # Tumor
+    seg.set_group_image(g1, arr1)
+
+    seg.rename_label(1, "Liver (edited)", (0.1, 0.9, 0.2))
+    seg.erase_label(3)  # keep the Kidney label, clear its pixels
+    seg.remove_label(2)  # drop Spleen entirely
+
+    seg2 = read_multilabel_nrrd(write_multilabel_nrrd(seg))
+    _assert_seg_semantically_equal(seg, seg2)
+
+    # Spot-check the intended end state survived the round-trip.
+    assert seg2.get_label(1).name == "Liver (edited)"
+    assert seg2.has_label(3) and not seg2.has_label(2)
+    assert int((seg2.get_group_image(0).array == 3).sum()) == 0  # erased pixels
+
+
 def test_roundtrip_array_data() -> None:
     seg = MultiLabelSegmentation.create(shape=(3, 4, 5), spacing=(1.0, 1.0, 1.0))
     g = seg.add_group("G")

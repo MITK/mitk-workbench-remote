@@ -25,7 +25,8 @@ This module provides:
   reserved. Supports group-level image access, label properties editing, and
   value remapping.
 - :class:`LabelGroup`: A named collection of labels within a
-  ``MultiLabelSegmentation``.
+  ``MultiLabelSegmentation``, exposed as a live view (its ``labels`` and
+  ``image`` reflect the segmentation's current state at access time).
 - :class:`Label`: A single label with value, name, color, opacity, visibility,
   and lock state.
 """
@@ -33,8 +34,9 @@ This module provides:
 from __future__ import annotations
 
 import html as _html
-from collections.abc import Sequence
-from typing import Any
+import warnings
+from collections.abc import Iterable, Sequence
+from typing import Any, overload
 
 import numpy as np
 
@@ -43,10 +45,17 @@ from mitk_workbench_remote._spatial import (
     _normalize_origin,
     _normalize_spacing,
 )
+from mitk_workbench_remote.errors import MitkApiDivergenceWarning
 
 # MITK's LabelSetImage requires this pixel type for all group images.
 # mitk::LabelSetImage::LabelValueType = unsigned short = uint16.
 LABEL_DTYPE: np.dtype = np.dtype(np.uint16)
+
+# Sentinel for add_label's second positional argument. The (label, group) and
+# (name, color, group) overloads share one implementation, so an unset second
+# positional cannot be distinguished from a legitimate ``group=0``/``color`` by
+# value alone.
+_MISSING: Any = object()
 
 # ---------------------------------------------------------------------------
 # Label
@@ -213,11 +222,17 @@ class Label:
 
 
 class LabelGroup:
-    """A named collection of label values within a MultiLabelSegmentation.
+    """One group of a MultiLabelSegmentation.
 
-    Label objects themselves are stored in the parent
-    :class:`MultiLabelSegmentation._labels` registry; this class only tracks
-    the ordered list of label values belonging to the group.
+    Returned by :attr:`MultiLabelSegmentation.groups` and
+    :meth:`MultiLabelSegmentation.get_group`. A LabelGroup is a *live view* over
+    its owning segmentation, not a point-in-time copy: :attr:`labels` and
+    :attr:`image` reflect the segmentation's current state at access time.
+
+    It also remains the internal membership record: the ordered label values
+    (:attr:`label_ids`) are read directly by the segmentation and the NRRD I/O
+    layer. Label objects themselves live in the parent's
+    :class:`MultiLabelSegmentation` ``_labels`` registry.
 
     Args:
         name: Optional group name.
@@ -226,15 +241,65 @@ class LabelGroup:
     def __init__(self, name: str | None = None) -> None:
         self._name: str | None = name
         self._label_ids: list[int] = []
+        # Back-reference to the owning segmentation, populated when the group is
+        # handed to a MultiLabelSegmentation (its __init__ or add_group). Without
+        # it, index/labels/image cannot be resolved.
+        self._seg: MultiLabelSegmentation | None = None
+        self._index: int | None = None
+
+    def _owner(self) -> tuple[MultiLabelSegmentation, int]:
+        if self._seg is None or self._index is None:
+            raise RuntimeError(
+                "LabelGroup is not attached to a MultiLabelSegmentation; "
+                "index/labels/image are only available for groups obtained via "
+                "seg.groups or seg.get_group(i)."
+            )
+        return self._seg, self._index
 
     @property
     def name(self) -> str | None:
-        """Group name, or ``None`` if unnamed."""
+        """Group name, or ``None`` if unnamed.
+
+        Read-only, matching native ``mitk.LabelGroup`` (a read-only snapshot).
+        Rename via :meth:`MultiLabelSegmentation.set_group_name`.
+        """
         return self._name
 
-    @name.setter
-    def name(self, v: str | None) -> None:
-        self._name = v
+    @property
+    def index(self) -> int:
+        """0-based position of this group within the owning segmentation.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation (e.g. a
+                bare ``LabelGroup(...)`` obtained other than via ``seg.groups`` or
+                ``seg.get_group(i)``).
+        """
+        _, index = self._owner()
+        return index
+
+    @property
+    def labels(self) -> list[Label]:
+        """Label objects in this group, current at access time.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation.
+        """
+        seg, index = self._owner()
+        return seg.get_group_labels(index)
+
+    @property
+    def image(self) -> Any:
+        """The group's live pixel :class:`~mitk_workbench_remote.image.Image`.
+
+        Delegates to :meth:`MultiLabelSegmentation.get_group_image`, so accessing
+        it lazily zero-allocates the image exactly as that method does, and edits
+        via ``.image.array`` persist on the segmentation.
+
+        Raises:
+            RuntimeError: If this group is not attached to a segmentation.
+        """
+        seg, index = self._owner()
+        return seg.get_group_image(index)
 
     @property
     def label_ids(self) -> list[int]:
@@ -342,6 +407,11 @@ class MultiLabelSegmentation:
         self._shape: tuple[int, ...] | None = canonical_shape
         self._max_value: int = max(self._labels.keys(), default=0)
 
+        # Single choke point for the group back-references: create() delegates
+        # here and _io.read_multilabel_nrrd() calls the constructor directly, so
+        # every user-reachable LabelGroup gets its owner/index set exactly once.
+        self._bind_groups()
+
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------
@@ -411,6 +481,11 @@ class MultiLabelSegmentation:
         return list(self._groups)
 
     @property
+    def num_groups(self) -> int:
+        """Number of groups (alias for ``len(self.groups)``)."""
+        return len(self._groups)
+
+    @property
     def labels(self) -> list[Label]:
         """All Label objects across all groups, sorted by value.
 
@@ -431,6 +506,11 @@ class MultiLabelSegmentation:
             return label.value
 
         return sorted(self._labels.values(), key=_key)
+
+    @property
+    def label_values(self) -> list[int]:
+        """All label values across all groups, sorted ascending."""
+        return sorted(self._labels.keys())
 
     @property
     def spacing(self) -> tuple[float, ...]:
@@ -555,16 +635,52 @@ class MultiLabelSegmentation:
     # Lookup
     # ------------------------------------------------------------------
 
-    def get_label(self, value: int) -> Label | None:
+    def get_label(self, value: int) -> Label:
         """Look up a label by value.
+
+        Labels are keyed by value, so a miss raises ``KeyError`` (dict-like),
+        matching native ``mitk.MultiLabelSegmentation.get_label``. Use
+        :meth:`has_label` for an existence check that never raises.
 
         Args:
             value: Integer label value.
 
         Returns:
-            The :class:`Label`, or ``None`` if not found.
+            The :class:`Label` with the given value.
+
+        Raises:
+            KeyError: If no label with ``value`` exists.
         """
-        return self._labels.get(value)
+        return self._labels[value]
+
+    def has_label(self, value: int) -> bool:
+        """Return whether a label with the given value exists.
+
+        Args:
+            value: Integer label value.
+
+        Returns:
+            ``True`` if a label with ``value`` exists, else ``False``. Never
+            raises (including for the reserved :attr:`UNLABELED_VALUE`).
+        """
+        return value in self._labels
+
+    def get_group_of_label(self, value: int) -> int:
+        """Return the index of the group that owns a label.
+
+        Args:
+            value: Integer label value.
+
+        Returns:
+            The 0-based index of the owning group.
+
+        Raises:
+            KeyError: If no label with ``value`` exists in any group.
+        """
+        for i, g in enumerate(self._groups):
+            if value in g._label_ids:
+                return i
+        raise KeyError(value)
 
     def get_group(self, index: int) -> LabelGroup:
         """Return the group at the given index.
@@ -596,6 +712,23 @@ class MultiLabelSegmentation:
                 return g
         return None
 
+    def set_group_name(self, index: int, name: str | None) -> None:
+        """Set a group's display name.
+
+        The group's :attr:`LabelGroup.name` is read-only; this is the supported
+        way to rename it, mirroring native ``set_group_name``. Passing ``None`` to
+        clear the name is a remote-only allowance -- native ``mitk`` requires a
+        string and rejects ``None``.
+
+        Args:
+            index: Group index.
+            name: New group name, or ``None`` to clear it (remote-only).
+
+        Raises:
+            IndexError: If ``index`` is out of range.
+        """
+        self.get_group(index)._name = name
+
     def get_group_labels(self, index: int) -> list[Label]:
         """Return all Label objects belonging to a group.
 
@@ -611,26 +744,116 @@ class MultiLabelSegmentation:
         group = self.get_group(index)
         return [self._labels[v] for v in group._label_ids if v in self._labels]
 
+    def get_labels(self, values: Iterable[int]) -> list[Label]:
+        """Return the labels for the given values, in input order.
+
+        Missing values are skipped silently (matching native ``get_labels`` and
+        preserving cross-mode parity). For a strict single lookup that raises,
+        use :meth:`get_label`.
+
+        Args:
+            values: Label values to look up.
+
+        Returns:
+            The matching :class:`Label` objects, in the order of ``values``.
+        """
+        return [self._labels[v] for v in values if v in self._labels]
+
+    def get_label_values_by_name(self, name: str, group: int | None = None) -> list[int]:
+        """Return the values of all labels whose name equals ``name``.
+
+        Args:
+            name: Label name to match exactly.
+            group: If given, restrict the search to that group.
+
+        Returns:
+            Matching label values, sorted ascending (consistent with
+            :attr:`label_values`); an empty list if none match.
+
+        Raises:
+            IndexError: If ``group`` is out of range.
+        """
+        candidates = self._labels.values() if group is None else self.get_group_labels(group)
+        matches = [lbl.value for lbl in candidates if lbl.name == name and lbl.value is not None]
+        return sorted(matches)
+
+    def get_group_label_values(self, index: int) -> list[int]:
+        """Return the label values belonging to a group, in group order.
+
+        Args:
+            index: Group index.
+
+        Returns:
+            The group's label values, in group order.
+
+        Raises:
+            IndexError: If ``index`` is out of range.
+        """
+        return self.get_group(index).label_ids
+
     # ------------------------------------------------------------------
     # Label management
     # ------------------------------------------------------------------
 
-    def add_label(self, label: Label, group: int) -> Label:
-        """Add a label to the specified group.
+    @overload
+    def add_label(self, label: Label, /, group: int = 0) -> Label: ...
 
-        If ``label.value`` is ``None``, the next free integer >= 1 is assigned.
+    @overload
+    def add_label(
+        self, name: str, /, color: tuple[float, float, float], group: int = 0
+    ) -> Label: ...
+
+    # The two overloads put different parameters at position 2 (group vs color),
+    # which no single named implementation signature can express; mypy's
+    # overload/impl compatibility check flags this even though every concrete
+    # call is accepted at runtime (positional group works in both spellings).
+    def add_label(  # type: ignore[misc]
+        self, label_or_name: Label | str, /, color: Any = _MISSING, group: int = 0
+    ) -> Label:
+        """Add a label to a group and return it (with its value assigned).
+
+        Two spellings, dispatched on the first argument's type:
+
+        - ``add_label(label, group=0)`` -- add an existing :class:`Label`.
+        - ``add_label(name, color, group=0)`` -- build and add a label from a
+          name and RGB color.
+
+        If ``label.value`` is ``None`` the next free integer >= 1 is assigned.
+
+        Unlike native mitk -- which clones the label and reassigns its value on a
+        collision -- this stores the given object and raises on collision.
 
         Args:
-            label: The label to add.
-            group: Target group index.
+            label_or_name: A :class:`Label`, or a label name (str) for the
+                convenience spelling.
+            color: RGB color, required only in the ``(name, color)`` spelling.
+            group: Target group index (default 0).
 
         Returns:
-            The label (with its value assigned).
+            The added label.
 
         Raises:
-            ValueError: If the value is 0 or already exists in any group.
+            TypeError: If the first argument is neither a Label nor a str, or the
+                str spelling is used without a color.
+            ValueError: If the value is 0 (reserved) or already exists.
             IndexError: If ``group`` is out of range.
         """
+        if isinstance(label_or_name, Label):
+            label = label_or_name
+            # The second positional argument is the group index here; it binds to
+            # `color` because both overloads share one implementation.
+            if color is not _MISSING:
+                group = color
+        elif isinstance(label_or_name, str):
+            if color is _MISSING:
+                raise TypeError("add_label(name, color, group=0) requires a color")
+            label = Label(name=label_or_name, color=color)
+        else:
+            raise TypeError(
+                f"first argument must be a Label or a name (str), got "
+                f"{type(label_or_name).__name__}"
+            )
+
         if group < 0 or group >= len(self._groups):
             raise IndexError(f"Group index {group} out of range (have {len(self._groups)} groups)")
 
@@ -650,44 +873,225 @@ class MultiLabelSegmentation:
         self._max_value = max(self._max_value, v)
         return label
 
-    def remove_label(self, value: int, *, clear_pixels: bool = True) -> None:
-        """Remove a label by value.
+    def remove_labels(self, values: Iterable[int]) -> None:
+        """Remove several labels (and their pixels).
+
+        Atomic: every value is validated to exist first (``KeyError`` naming the
+        first missing value) before any label is removed.
+
+        Args:
+            values: Label values to remove.
+
+        Raises:
+            KeyError: If any value is not present in any group.
+        """
+        for v in self._validated_unique(values):
+            self.remove_label(v)
+
+    def erase_label(self, value: int) -> None:
+        """Zero every pixel equal to ``value`` in its group image; keep the label.
+
+        Unlike :meth:`remove_label`, the label metadata is retained. If the
+        group's image has not been allocated yet this is a no-op on pixels (it
+        does not force allocation). After erasing, :meth:`validate` reports the
+        label as declared-but-unpainted, which is the intended state.
+
+        Args:
+            value: Label value whose pixels to clear.
+
+        Raises:
+            KeyError: If ``value`` is not present in any group.
+        """
+        group_idx = self.get_group_of_label(value)
+        img = self._group_images[group_idx]
+        if img is not None:
+            arr = img.array
+            arr[arr == value] = 0
+
+    def erase_labels(self, values: Iterable[int]) -> None:
+        """:meth:`erase_label` for several values, with the same atomic validation.
+
+        Args:
+            values: Label values whose pixels to clear.
+
+        Raises:
+            KeyError: If any value is not present in any group.
+        """
+        for v in self._validated_unique(values):
+            self.erase_label(v)
+
+    def rename_label(self, value: int, name: str, color: tuple[float, float, float]) -> None:
+        """Set a label's name and color in one call.
+
+        Both ``name`` and ``color`` are required, matching native ``rename_label``.
+
+        Args:
+            value: Label value to rename.
+            name: New label name.
+            color: New RGB color, components in [0.0, 1.0].
+
+        Raises:
+            KeyError: If ``value`` is not present.
+            ValueError: If any color component is out of [0.0, 1.0].
+        """
+        label = self.get_label(value)
+        # Set color first: its setter validates the range and raises before
+        # mutating, so a bad color leaves the label untouched (atomic rename).
+        label.color = color
+        label.name = name
+
+    def merge_labels(self, target: int, sources: Iterable[int]) -> None:
+        """Reassign each source label's pixels to ``target``, then remove the sources.
+
+        Simplified vs native ``mitk.MultiLabelSegmentation.merge_labels``: it does
+        not implement lock handling, merge/overwrite styles, or native's
+        ``TransferLabelContent`` semantics, and -- unlike native, which retains
+        the source labels -- it removes them. On use it emits
+        :class:`~mitk_workbench_remote.errors.MitkApiDivergenceWarning`. It exists
+        so callers do not break under ``get_data(as_type=AUTO)``; for full
+        fidelity use the mitk bindings.
+
+        In the target group, overlaps are best-effort (the target value wins),
+        which can overwrite another target-group label's last pixels and leave it
+        declared but unpainted -- part of the documented divergence.
+
+        Args:
+            target: Label value that the sources are merged into.
+            sources: Label values to merge into ``target`` and then remove.
+
+        Raises:
+            KeyError: If ``target`` or any source is not present.
+        """
+        if not self.has_label(target):
+            raise KeyError(target)
+        # Drop the target from the sources (dedup preserves order) so a self-merge
+        # cannot remove the target label.
+        source_values = [s for s in dict.fromkeys(sources) if s != target]
+        for s in source_values:
+            if not self.has_label(s):
+                raise KeyError(s)
+
+        warnings.warn(
+            "merge_labels is a simplified stand-in for native mitk merge_labels: "
+            "it does not support lock handling or merge/overwrite styles, and it "
+            "removes the source labels (native retains them). Use "
+            "mitk.MultiLabelSegmentation.merge_labels for full fidelity.",
+            MitkApiDivergenceWarning,
+            stacklevel=2,
+        )
+
+        target_img = self.get_group_image(self.get_group_of_label(target))
+        for s in source_values:
+            src_img = self.get_group_image(self.get_group_of_label(s))
+            target_img.array[src_img.array == s] = target
+            # remove_label zeroes any residual source pixels and drops the label.
+            self.remove_label(s)
+
+    def _validated_unique(self, values: Iterable[int]) -> list[int]:
+        """Validate every value exists, then return them de-duplicated, in order.
+
+        Deduping is required for atomicity: a repeated value would miss on its
+        second pass once the first pass removed it, leaving a half-applied state.
+
+        Raises:
+            KeyError: naming the first value not present in any group.
+        """
+        materialized = list(values)
+        for v in materialized:
+            if not self.has_label(v):
+                raise KeyError(v)
+        return list(dict.fromkeys(materialized))
+
+    def remove_label(self, value: int) -> None:
+        """Remove a label and zero its pixels in its group image.
+
+        Matches native ``mitk.MultiLabelSegmentation.remove_label``: MITK does
+        not model a "remove the label but keep its orphan pixels" state. To
+        clear a label's pixels while keeping the label, use :meth:`erase_label`;
+        to reassign pixels to another label, remap them first, then remove.
 
         Args:
             value: Label value to remove.
-            clear_pixels: If ``True`` (default), zero out pixels equal to ``value``
-                in the group's image before removing the label.
 
         Raises:
-            ValueError: If ``value`` is not found in any group.
+            KeyError: If ``value`` is not present in any group.
         """
-        group_idx: int | None = None
-        for i, g in enumerate(self._groups):
-            if value in g._label_ids:
-                group_idx = i
-                break
-        if group_idx is None:
-            raise ValueError(f"Label value {value} not found in any group")
+        group_idx = self.get_group_of_label(value)
 
-        if clear_pixels and self._group_images[group_idx] is not None:
+        if self._group_images[group_idx] is not None:
             arr = self._group_images[group_idx].array
             arr[arr == value] = 0
 
         self._groups[group_idx]._label_ids.remove(value)
         del self._labels[value]
 
-    def add_group(self, name: str | None = None) -> int:
-        """Append a new empty group and return its index.
+    def _bind_groups(self) -> None:
+        """Attach each group's owner back-reference and positional index."""
+        for i, g in enumerate(self._groups):
+            g._seg = self
+            g._index = i
+
+    def add_group(
+        self,
+        name: str | None = None,
+        image: Any | None = None,
+        labels: list[Label] | None = None,
+    ) -> int:
+        """Append a new group and return its index.
+
+        Optionally seed the group with pixel ``image`` and/or a list of
+        ``labels``. ``image`` and ``labels`` are positional-or-keyword to mirror
+        native ``add_group(name, image, labels)``, so the same call works in
+        both modes.
 
         Args:
             name: Optional group name.
+            image: Optional pixel data (ndarray / Image / converter type, same
+                acceptance as :meth:`set_group_image`).
+            labels: Optional labels to add to the new group (each via
+                :meth:`add_label`; value assignment and collision handling are
+                identical).
 
         Returns:
             Index of the newly added group.
+
+        Raises:
+            TypeError: If ``image`` cannot be resolved to an ndarray (not an
+                ndarray, :class:`~mitk_workbench_remote.image.Image`, or a type
+                with a registered converter).
+            ValueError: On shape/geometry mismatch of ``image`` or a duplicate
+                label value.
+
+        On any failure the half-seeded group is rolled back, so a raised
+        ``add_group`` never leaves a dangling group behind.
         """
-        self._groups.append(LabelGroup(name=name))
+        group = LabelGroup(name=name)
+        self._groups.append(group)
         self._group_images.append(None)
-        return len(self._groups) - 1
+        index = len(self._groups) - 1
+        group._seg = self
+        group._index = index
+
+        # Seeding needs the group to exist (set_group_image/add_label take an
+        # index), so it happens after the append; roll back if it raises.
+        # set_group_image may set self._shape on a previously-shapeless
+        # segmentation, so capture and restore it alongside the labels.
+        labels_before = set(self._labels)
+        shape_before = self._shape
+        try:
+            if image is not None:
+                self.set_group_image(index, image)
+            if labels is not None:
+                for label in labels:
+                    self.add_label(label, index)
+        except Exception:
+            del self._groups[index]
+            del self._group_images[index]
+            for v in set(self._labels) - labels_before:
+                del self._labels[v]
+            self._shape = shape_before
+            raise
+        return index
 
     def _next_free_value(self) -> int:
         """Return the next available label value as a high-water mark plus one.

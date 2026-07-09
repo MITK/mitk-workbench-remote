@@ -169,6 +169,23 @@ class UnsupportedOperationError(MitkError):
         super().__init__(message)
 
 
+class MitkApiDivergenceWarning(UserWarning):
+    """A remote method knowingly diverges in behavior from native MITK.
+
+    Emitted when a ``mitk_workbench_remote`` method is a simplified stand-in for
+    a native ``mitk`` operation rather than a faithful reimplementation, so its
+    results may differ from what native MITK would produce. It exists so callers
+    know that behavior can differ across the ``get_data(as_type=AUTO)`` modes.
+    The current sole user is
+    :meth:`~mitk_workbench_remote.MultiLabelSegmentation.merge_labels`.
+
+    Silence it with
+    ``warnings.filterwarnings("ignore", category=MitkApiDivergenceWarning)``
+    when the divergence is acceptable, or escalate it to an error with
+    ``warnings.filterwarnings("error", category=MitkApiDivergenceWarning)``.
+    """
+
+
 class ApiError(MitkError):
     """Catch-all for 4xx/5xx responses not covered by a more specific type.
 

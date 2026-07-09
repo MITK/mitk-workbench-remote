@@ -939,7 +939,7 @@ def test_get_data_multilabel_segmentation_direct_mode() -> None:
     result = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(result, MultiLabelSegmentation)
     assert len(result.groups) == 1
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1264,7 +1264,7 @@ def test_get_data_multilabel_remote_returns_mw_mls() -> None:
     )
     result = node.get_data(as_type=DataRepresentation.REMOTE)
     assert isinstance(result, MultiLabelSegmentation)
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 @responses.activate
@@ -1292,7 +1292,7 @@ def test_get_data_multilabel_auto_without_mitk_returns_mw_mls() -> None:
         result = node.get_data(as_type=DataRepresentation.AUTO)
 
     assert isinstance(result, MultiLabelSegmentation)
-    assert result.get_label(1) is not None
+    assert result.has_label(1)
 
 
 @responses.activate
@@ -1524,7 +1524,7 @@ class TestGetDataWithMitk:
         ref = mitk.Image.from_numpy(np.zeros((3, 4, 5), dtype=np.uint16), spacing=(1.0, 1.0, 1.0))
         mitk_seg = mitk.MultiLabelSegmentation(ref)
         lbl = mitk.Label(1, "Organ")
-        mitk_seg.add_group(None, [lbl])
+        mitk_seg.add_group(None, labels=[lbl])
 
         node.set_data(mitk_seg)
         assert len(responses.calls) == 1

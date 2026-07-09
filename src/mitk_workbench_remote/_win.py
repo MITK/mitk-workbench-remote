@@ -85,3 +85,38 @@ def _kill_port_listeners(port: int) -> None:
         return
     for pid in _find_listening_pids(port):
         _kill_pid_tree(pid)
+
+
+def _workbench_process_running(image_name: str) -> bool:
+    """Best-effort check whether a process with *image_name* is running (Windows only).
+
+    MITK Workbench is single-instance: starting it again while an instance is
+    already running makes the new process hand off to the running one and exit
+    without bringing up a REST server on the requested port. ``launch()`` uses
+    this to detect that situation up front and give an actionable error instead
+    of waiting out the full timeout on a handoff that can never succeed.
+
+    Returns ``False`` off Windows or if the query cannot be performed or parsed.
+    Callers treat an inconclusive result as "not running" and fall back to the
+    ordinary launch-then-poll behavior, so a false negative only costs the old
+    (worse) error message, never a crash.
+
+    Args:
+        image_name: Process image name to look for, e.g. ``"MitkWorkbench.exe"``.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/NH", "/FO", "CSV"],
+            capture_output=True,
+        )
+    except OSError:
+        return False
+    # tasklist prints a localized "no tasks match" line to stdout when nothing
+    # matches, and CSV rows that quote the image name when it does. Match on the
+    # (ASCII) image name so the check is locale- and codepage-independent; decode
+    # with replacement so an OEM-codepage info line can never raise.
+    raw = result.stdout or b""
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    return image_name.lower() in text.lower()

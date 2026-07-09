@@ -7,7 +7,7 @@ authors:
   - family-names: Floca
     given-names: Ralf
     affiliation: "German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)"
-    # orcid: "https://orcid.org/0000-0003-3218-3377"
+    orcid: "https://orcid.org/0000-0003-3218-3377"
   # Add further named maintainers above this line, then the team entity below.
   - name: "MITK Development Team"
     affiliation: "German Cancer Research Center (DKFZ), Division of Medical Image Computing (MIC)"
@@ -15,7 +15,7 @@ license: Apache-2.0
 repository-code: "https://github.com/MITK/mitk-workbench-remote"
 url: "https://mitk-workbench-remote.readthedocs.io"
 version: 0.1.0
-# date-released: 2026-01-01  # set to the actual date when 0.1.0 is published
+date-released: 2026-07-09  # update if the PyPI publish lands on a different day
 keywords:
   - MITK
   - medical imaging
