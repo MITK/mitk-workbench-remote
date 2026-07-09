@@ -53,8 +53,10 @@ smoke-optional:
     PYTHON_VERSION: "3.12"
   # Install only the stable optional extras (not [dev]) so the job exercises
   # converter auto-registration against the real SimpleITK and mlarray
-  # packages. mitk-python is excluded here: it is a dev-only, pre-release
-  # native binding, validated manually at release time rather than in CI.
+  # packages. mitk-python is excluded here: it is a heavy native binding
+  # published only for CPython 3.12, so it cannot install across this job's
+  # peers on 3.11/3.13; it is validated manually at release time rather than in
+  # CI. A dedicated gated 3.12 job is tracked separately (see ISSUE_DRAFT_mitk_python_ci.md).
   before_script:
     - pip install -e ".[simpleitk,mlarray]"
   script:
